@@ -1,12 +1,7 @@
-# 🚀 Kubernetes Control Plane Troubleshooting Guide
+ 🚀 Kubernetes Control Plane Troubleshooting Guide
+ A comprehensive guide to debugging common Kubernetes control plane issues with practical solutions and diagnostic commands for CKA/CKAD exam preparation and production troubleshooting.
 
-[![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Contributions Welcome](https://img.shields.io/badge/Contributions-Welcome-brightgreen.svg?style=for-the-badge)](CONTRIBUTING.md)
-
-> A comprehensive guide to debugging common Kubernetes control plane issues with practical solutions and diagnostic commands for CKA/CKAD exam preparation and production troubleshooting.
-
-## 📋 Table of Contents
+📋 Table of Contents
 
 - [Overview](#-overview)
 - [Prerequisites](#-prerequisites)
@@ -17,66 +12,55 @@
   - [Scenario 4: Controller Manager Failures](#scenario-4-controller-manager-failures)
   - [Scenario 5: Scheduler Configuration Issues](#scenario-5-scheduler-configuration-issues)
   - [Scenario 6: Certificate Expiration](#scenario-6-certificate-expiration)
-- [Quick Reference](#-quick-reference)
-- [Best Practices](#-best-practices)
-- [Contributing](#-contributing)
-- [License](#-license)
 
-## 🎯 Overview
+
+🎯 Overview
 
 This repository contains detailed troubleshooting scenarios for Kubernetes control plane components. Each scenario includes:
 
-- ✅ **Problem Description** - Clear explanation of the issue
-- 🔍 **Symptoms** - What you'll observe
-- 🛠️ **Diagnostic Steps** - Commands to identify the root cause
-- 💡 **Solutions** - Step-by-step fixes
-- 📝 **Examples** - Real-world command outputs
+- ✅ Problem Description - Clear explanation of the issue
+- 🔍 Symptoms - What you'll observe
+- 🛠️ Diagnostic Steps - Commands to identify the root cause
+- 💡 Solutions - Step-by-step fixes
+- 📝 Examples - Real-world command outputs
 
-## 📚 Prerequisites
+📚 Prerequisites
 
 - Basic understanding of Kubernetes architecture
 - Access to a Kubernetes cluster with root/sudo privileges
 - Familiarity with command-line tools
 - Knowledge of YAML configuration
 
-### Required Tools
+Required Tools
 
-```bash
 kubectl    # Kubernetes CLI
 crictl     # Container runtime interface CLI
 kubeadm    # Kubernetes cluster management
 journalctl # System logs viewer
 ss         # Socket statistics
-```
 
-## 🔧 Troubleshooting Scenarios
 
-### Scenario 1: API Server Connection Refused
+🔧 Troubleshooting Scenarios
 
-<details>
-<summary><strong>📖 Click to expand</strong></summary>
+Scenario 1: API Server Connection Refused
 
-#### 🔴 Problem
+ 🔴 Problem
 
 When running `kubectl` commands, you receive a connection refused error:
 
-```bash
 The connection to the server 172.30.1.2:6443 was refused - did you specify the right host or port?
-```
 
-#### 🎯 Symptoms
+🎯 Symptoms
 
 - ❌ `kubectl get pods` returns connection refused error
 - ❌ API server is not responding on port 6443
 - ❌ Unable to communicate with the cluster
 
-#### 🔍 Diagnostic Steps
+🔍 Diagnostic Steps
 
 **Step 1:** Verify you're on the correct control plane node
 
-```bash
 hostname -i
-```
 
 **Step 2:** Check if port 6443 is listening
 
