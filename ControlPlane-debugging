@@ -1,598 +1,342 @@
-# Kubernetes Control Plane Troubleshooting Guide
+# 🚀 Kubernetes Control Plane Troubleshooting Guide
 
-A comprehensive guide to debugging common Kubernetes control plane issues with practical solutions and diagnostic commands.
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?style=for-the-badge&logo=kubernetes&logoColor=white)](https://kubernetes.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Contributions Welcome](https://img.shields.io/badge/Contributions-Welcome-brightgreen.svg?style=for-the-badge)](CONTRIBUTING.md)
 
-## Table of Contents
-- [Scenario 1: API Server Connection Refused](#scenario-1-api-server-connection-refused)
-- [Scenario 2: ETCD Server Issues](#scenario-2-etcd-server-issues)
-- [Scenario 3: Certificate Path Errors](#scenario-3-certificate-path-errors)
-- [Scenario 4: Controller Manager Failures](#scenario-4-controller-manager-failures)
-- [Scenario 5: Scheduler Configuration Issues](#scenario-5-scheduler-configuration-issues)
-- [Scenario 6: Certificate Expiration](#scenario-6-certificate-expiration)
+> A comprehensive guide to debugging common Kubernetes control plane issues with practical solutions and diagnostic commands for CKA/CKAD exam preparation and production troubleshooting.
 
----
+## 📋 Table of Contents
 
-## Scenario 1: API Server Connection Refused
+- [Overview](#-overview)
+- [Prerequisites](#-prerequisites)
+- [Troubleshooting Scenarios](#-troubleshooting-scenarios)
+  - [Scenario 1: API Server Connection Refused](#scenario-1-api-server-connection-refused)
+  - [Scenario 2: ETCD Server Issues](#scenario-2-etcd-server-issues)
+  - [Scenario 3: Certificate Path Errors](#scenario-3-certificate-path-errors)
+  - [Scenario 4: Controller Manager Failures](#scenario-4-controller-manager-failures)
+  - [Scenario 5: Scheduler Configuration Issues](#scenario-5-scheduler-configuration-issues)
+  - [Scenario 6: Certificate Expiration](#scenario-6-certificate-expiration)
+- [Quick Reference](#-quick-reference)
+- [Best Practices](#-best-practices)
+- [Contributing](#-contributing)
+- [License](#-license)
 
-### Problem Description
-When running `kubectl` commands, you receive a connection refused error:
+## 🎯 Overview
+
+This repository contains detailed troubleshooting scenarios for Kubernetes control plane components. Each scenario includes:
+
+- ✅ **Problem Description** - Clear explanation of the issue
+- 🔍 **Symptoms** - What you'll observe
+- 🛠️ **Diagnostic Steps** - Commands to identify the root cause
+- 💡 **Solutions** - Step-by-step fixes
+- 📝 **Examples** - Real-world command outputs
+
+## 📚 Prerequisites
+
+- Basic understanding of Kubernetes architecture
+- Access to a Kubernetes cluster with root/sudo privileges
+- Familiarity with command-line tools
+- Knowledge of YAML configuration
+
+### Required Tools
+
+```bash
+kubectl    # Kubernetes CLI
+crictl     # Container runtime interface CLI
+kubeadm    # Kubernetes cluster management
+journalctl # System logs viewer
+ss         # Socket statistics
 ```
+
+## 🔧 Troubleshooting Scenarios
+
+### Scenario 1: API Server Connection Refused
+
+<details>
+<summary><strong>📖 Click to expand</strong></summary>
+
+#### 🔴 Problem
+
+When running `kubectl` commands, you receive a connection refused error:
+
+```bash
 The connection to the server 172.30.1.2:6443 was refused - did you specify the right host or port?
 ```
 
-### Symptoms
-- `kubectl get pods` returns connection refused error
-- API server is not responding on port 6443
-- Unable to communicate with the cluster
+#### 🎯 Symptoms
 
-### Diagnostic Steps
+- ❌ `kubectl get pods` returns connection refused error
+- ❌ API server is not responding on port 6443
+- ❌ Unable to communicate with the cluster
 
-1. **Verify you're on the correct control plane node:**
-   ```bash
-   hostname -i
-   ```
+#### 🔍 Diagnostic Steps
 
-2. **Check if port 6443 is listening:**
-   ```bash
-   sudo ss -tlpn | grep 6443
-   ```
-   Expected output should show kube-apiserver listening on port 6443:
-   ```
-   LISTEN 0 4096 *:6443 *:* users:(("kube-apiserver",pid=15238,fd=3))
-   ```
+**Step 1:** Verify you're on the correct control plane node
 
-3. **Check running containers:**
-   ```bash
-   sudo crictl ps | grep kube-apiserver
-   ```
+```bash
+hostname -i
+```
 
-4. **Check all containers including exited ones:**
-   ```bash
-   sudo crictl ps -a | grep kube-apiserver
-   ```
+**Step 2:** Check if port 6443 is listening
 
-5. **Review API server logs:**
-   ```bash
-   sudo crictl logs <container-id>
-   # Or check pod logs directly:
-   ls /var/log/pods/kube-system_kube-apiserver-*
-   cat /var/log/pods/kube-system_kube-apiserver-*/kube-apiserver/*.log
-   ```
+```bash
+sudo ss -tlpn | grep 6443
+```
 
-### Common Root Causes
+Expected output:
+```
+LISTEN 0 4096 *:6443 *:* users:(("kube-apiserver",pid=15238,fd=3))
+```
 
-#### Invalid IP Address Configuration
+**Step 3:** Check running containers
+
+```bash
+sudo crictl ps | grep kube-apiserver
+```
+
+**Step 4:** Check all containers including exited ones
+
+```bash
+sudo crictl ps -a | grep kube-apiserver
+```
+
+**Step 5:** Review API server logs
+
+```bash
+sudo crictl logs <container-id>
+# Or check pod logs directly:
+cat /var/log/pods/kube-system_kube-apiserver-*/kube-apiserver/*.log
+```
+
+#### ⚠️ Common Root Cause: Invalid IP Address Configuration
+
 **Error in logs:**
 ```
 Error: invalid argument "172.30.1.2222" for "--advertise-address" flag: failed to parse IP: "172.30.1.2222"
 ```
 
-**Solution:**
-1. Edit the API server manifest:
-   ```bash
-   sudo vim /etc/kubernetes/manifests/kube-apiserver.yaml
-   ```
+#### ✅ Solution
 
-2. Correct the `--advertise-address` parameter:
-   ```yaml
-   - --advertise-address=172.30.1.2  # Ensure this is a valid IP
-   ```
+**Step 1:** Edit the API server manifest
 
-3. Save the file. Kubelet will automatically restart the API server pod.
+```bash
+sudo vim /etc/kubernetes/manifests/kube-apiserver.yaml
+```
 
-4. Verify the fix:
-   ```bash
-   sudo crictl ps | grep kube-apiserver
-   kubectl get nodes
-   ```
+**Step 2:** Correct the `--advertise-address` parameter
 
-### Key Ports Reference
+```yaml
+spec:
+  containers:
+  - command:
+    - kube-apiserver
+    - --advertise-address=172.30.1.2  # ✅ Ensure this is a valid IP
+```
+
+**Step 3:** Save the file. Kubelet will automatically restart the API server pod.
+
+**Step 4:** Verify the fix
+
+```bash
+sudo crictl ps | grep kube-apiserver
+kubectl get nodes
+```
+
+#### 📊 Key Ports Reference
+
 | Port | Service | Purpose |
 |------|---------|---------|
 | 6443 | kube-apiserver | Kubernetes API server |
 | 2379 | etcd | etcd client requests |
 | 2380 | etcd | etcd peer communication |
 | 10250 | kubelet | Kubelet API |
-| 10251 | kube-scheduler | Scheduler health checks |
-| 10252 | kube-controller-manager | Controller manager health checks |
+| 10257 | kube-controller-manager | Controller manager (secure) |
+| 10259 | kube-scheduler | Scheduler (secure) |
+
+</details>
 
 ---
 
-## Scenario 2: ETCD Server Issues
+### Scenario 2: ETCD Server Issues
 
-### Problem Description
+<details>
+<summary><strong>📖 Click to expand</strong></summary>
+
+#### 🔴 Problem
+
 `kubectl` commands hang or timeout. The API server cannot communicate with etcd.
 
-### Symptoms
-```
+```bash
 error from server (Timeout): the server was unable to return a response in the time allocated
 ```
-- Commands get stuck and eventually timeout
-- API server logs show etcd connection errors
-- Read/write operations fail
 
-### Diagnostic Steps
+#### 🎯 Symptoms
 
-1. **Check etcd container status:**
-   ```bash
-   sudo crictl ps | grep etcd
-   ```
+- ⏳ Commands get stuck and eventually timeout
+- ❌ API server logs show etcd connection errors
+- ❌ Read/write operations fail
 
-2. **Check for exited etcd containers:**
-   ```bash
-   sudo crictl ps -a | grep etcd
-   ```
+#### 🔍 Diagnostic Steps
 
-3. **Review etcd logs:**
-   ```bash
-   sudo crictl logs <etcd-container-id>
-   # Or:
-   cat /var/log/pods/kube-system_etcd-controlplane-*/etcd/*.log
-   ```
+**Step 1:** Check etcd container status
 
-### Common Root Causes
+```bash
+sudo crictl ps | grep etcd
+```
 
-#### Missing or Incorrect Certificate Path
+**Step 2:** Check for exited etcd containers
+
+```bash
+sudo crictl ps -a | grep etcd
+```
+
+Example output:
+```
+de68752865477 a3e246e9556e9 17 minutes ago Running etcd 2 36c3e4777cdf4 etcd-controlplane
+c60c562293400 a3e246e9556e9 5 days ago     Exited  etcd 1 822c787c6f9fb etcd-controlplane
+```
+
+**Step 3:** Review etcd logs
+
+```bash
+sudo crictl logs <etcd-container-id>
+# Or:
+cat /var/log/pods/kube-system_etcd-controlplane-*/etcd/*.log
+```
+
+#### ⚠️ Common Root Cause 1: Missing or Incorrect Certificate Path
+
 **Error in logs:**
+```json
+{
+  "level":"error",
+  "ts":"2025-12-24T08:07:10.349229Z",
+  "caller":"embed/etcd.go:586",
+  "msg":"creating peer listener failed",
+  "error":"open /etc/kubernetes/pki/etcd/ca.crt: no such file or directory"
+}
 ```
-{"level":"error","ts":"2025-12-24T08:07:10.349229Z","caller":"embed/etcd.go:586",
-"msg":"creating peer listener failed","error":"open /etc/kubernetes/pki/etcd/ca.crt: 
-no such file or directory"}
+
+#### ✅ Solution
+
+**Step 1:** Verify certificate files exist
+
+```bash
+ls -la /etc/kubernetes/pki/etcd/
 ```
 
-**Solution:**
-1. Verify certificate files exist:
-   ```bash
-   ls -la /etc/kubernetes/pki/etcd/
-   ```
+**Step 2:** Edit the etcd manifest
 
-2. Edit the etcd manifest:
-   ```bash
-   sudo vim /etc/kubernetes/manifests/etcd.yaml
-   ```
+```bash
+sudo vim /etc/kubernetes/manifests/etcd.yaml
+```
 
-3. Correct the certificate paths:
-   ```yaml
-   spec:
-     containers:
-     - command:
-       - etcd
-       - --cert-file=/etc/kubernetes/pki/etcd/server.crt
-       - --key-file=/etc/kubernetes/pki/etcd/server.key
-       - --trusted-ca-file=/etc/kubernetes/pki/etcd/ca.crt  # Fix the path here
-       - --peer-cert-file=/etc/kubernetes/pki/etcd/peer.crt
-       - --peer-key-file=/etc/kubernetes/pki/etcd/peer.key
-       - --peer-trusted-ca-file=/etc/kubernetes/pki/etcd/ca.crt
-   ```
+**Step 3:** Correct the certificate paths
 
-4. Verify volume mounts match the paths:
-   ```yaml
-   volumeMounts:
-   - mountPath: /etc/kubernetes/pki/etcd
-     name: etcd-certs
-   volumes:
-   - hostPath:
-       path: /etc/kubernetes/pki/etcd
-       type: DirectoryOrCreate
-     name: etcd-certs
-   ```
+```yaml
+spec:
+  containers:
+  - command:
+    - etcd
+    - --cert-file=/etc/kubernetes/pki/etcd/server.crt
+    - --key-file=/etc/kubernetes/pki/etcd/server.key
+    - --trusted-ca-file=/etc/kubernetes/pki/etcd/ca.crt  # ✅ Fix the path
+    - --peer-cert-file=/etc/kubernetes/pki/etcd/peer.crt
+    - --peer-key-file=/etc/kubernetes/pki/etcd/peer.key
+    - --peer-trusted-ca-file=/etc/kubernetes/pki/etcd/ca.crt
+```
 
-5. Save and wait for kubelet to restart the pod.
+**Step 4:** Verify volume mounts match the paths
 
-#### Data Directory Mismatch
+```yaml
+volumeMounts:
+- mountPath: /etc/kubernetes/pki/etcd
+  name: etcd-certs
+volumes:
+- hostPath:
+    path: /etc/kubernetes/pki/etcd
+    type: DirectoryOrCreate
+  name: etcd-certs
+```
+
+#### ⚠️ Common Root Cause 2: Data Directory Mismatch
+
 **Error in logs:**
 ```
 "started to purge a file /var/lib/etcd-data/member/snap"
 ```
 
-**Solution:**
-1. Edit the etcd manifest:
-   ```bash
-   sudo vim /etc/kubernetes/manifests/etcd.yaml
-   ```
+#### ✅ Solution
 
-2. Ensure consistency between `--data-dir` and volume mount:
-   ```yaml
-   spec:
-     containers:
-     - command:
-       - etcd
-       - --data-dir=/var/lib/etcd  # Should match volume mount
-     volumeMounts:
-     - mountPath: /var/lib/etcd
-       name: etcd-data
-     volumes:
-     - hostPath:
-         path: /var/lib/etcd
-         type: DirectoryOrCreate
-       name: etcd-data
-   ```
+Ensure consistency between `--data-dir` and volume mount:
+
+```yaml
+spec:
+  containers:
+  - command:
+    - etcd
+    - --data-dir=/var/lib/etcd  # ✅ Should match volume mount
+  volumeMounts:
+  - mountPath: /var/lib/etcd
+    name: etcd-data
+  volumes:
+  - hostPath:
+      path: /var/lib/etcd
+      type: DirectoryOrCreate
+    name: etcd-data
+```
+
+#### 💡 Important Note
+
+> **CNI Issues vs Control Plane**: CNI (Container Network Interface) issues will affect workload pods but NOT control plane pods. Control plane pods run with `hostNetwork: true` and are static pods managed by kubelet.
+
+</details>
 
 ---
 
-## Scenario 3: Certificate Path Errors
+### Scenario 3: Certificate Path Errors
 
-### Problem Description
+<details>
+<summary><strong>📖 Click to expand</strong></summary>
+
+#### 🔴 Problem
+
 Control plane components fail to start due to missing or incorrectly configured certificates.
 
-### Symptoms
-- Pods in CrashLoopBackOff state
-- Authentication errors in logs
-- "no such file or directory" errors for certificate files
+#### 🎯 Symptoms
 
-### Diagnostic Steps
+- 🔄 Pods in CrashLoopBackOff state
+- ❌ Authentication errors in logs
+- 📁 "no such file or directory" errors for certificate files
 
-1. **Check all control plane component logs:**
-   ```bash
-   ls /var/log/pods/kube-system_kube-*
-   ```
+#### 🔍 Diagnostic Steps
 
-2. **Review specific component logs:**
-   ```bash
-   cat /var/log/pods/kube-system_kube-apiserver-*/kube-apiserver/*.log
-   cat /var/log/pods/kube-system_etcd-*/etcd/*.log
-   ```
-
-3. **Verify certificate files exist:**
-   ```bash
-   ls -la /etc/kubernetes/pki/
-   ls -la /etc/kubernetes/pki/etcd/
-   ```
-
-### Solution
-Follow the certificate path correction steps outlined in Scenario 2.
-
-**Important Note:** CNI (Container Network Interface) issues will affect workload pods but not control plane pods. Control plane pods run with `hostNetwork: true` and are static pods managed by kubelet.
-
----
-
-## Scenario 4: Controller Manager Failures
-
-### Problem Description
-Deployments don't scale properly. Desired replica count doesn't match actual running pods.
-
-### Symptoms
-```bash
-kubectl scale deployment nginx --replicas=4
-kubectl get deployment nginx
-# Output: nginx  3/4  3  3  10m
-```
-- Desired state: 4 replicas
-- Current state: 3 replicas
-- Controller manager pod not running
-
-### Diagnostic Steps
-
-1. **Check deployment status:**
-   ```bash
-   kubectl get deployments
-   kubectl describe deployment <deployment-name>
-   ```
-
-2. **Check controller manager pod:**
-   ```bash
-   kubectl get pods -n kube-system | grep controller-manager
-   ```
-
-3. **Check controller manager logs:**
-   ```bash
-   kubectl logs -n kube-system kube-controller-manager-controlplane
-   # Or:
-   cat /var/log/pods/kube-system_kube-controller-manager-*/kube-controller-manager/*.log
-   ```
-
-4. **Check kubelet logs:**
-   ```bash
-   sudo journalctl -u kubelet -f
-   ```
-
-5. **Describe the controller manager pod:**
-   ```bash
-   kubectl describe pod kube-controller-manager-controlplane -n kube-system
-   ```
-
-### Common Root Causes
-
-#### Binary Path Error
-**Error in logs:**
-```
-OCI runtime create failed: unable to start container process: 
-exec: "kube-controller-manager": executable file not found in $PATH
-```
-
-**Solution:**
-1. Edit the controller manager manifest:
-   ```bash
-   sudo vim /etc/kubernetes/manifests/kube-controller-manager.yaml
-   ```
-
-2. Verify the command path is correct:
-   ```yaml
-   spec:
-     containers:
-     - command:
-       - kube-controller-manager  # Ensure this is correct, not a typo
-       # Should be: kube-controller-manager
-       # Not: ube-controller-manager or kube-controler-manager
-   ```
-
-3. Common typos to check:
-   - Missing 'k' at the beginning
-   - Misspelled 'controller'
-   - Missing hyphens
-
-4. Save the file and verify:
-   ```bash
-   sudo crictl ps | grep controller-manager
-   kubectl get pods -n kube-system
-   ```
-
----
-
-## Scenario 5: Scheduler Configuration Issues
-
-### Problem Description
-Pods remain in `Pending` state indefinitely without any resource constraints or affinity issues.
-
-### Symptoms
-```bash
-kubectl get pods
-# Output: pod-name  0/1  Pending  0  5m
-```
-- Pods stuck in Pending state
-- No CrashLoopBackOff or ImagePullBackOff errors
-- Scheduler pod not running properly
-
-### Diagnostic Steps
-
-1. **Check pod status:**
-   ```bash
-   kubectl get pods
-   kubectl describe pod <pod-name>
-   ```
-
-2. **Check scheduler pod:**
-   ```bash
-   kubectl get pods -n kube-system | grep scheduler
-   ```
-
-3. **Review scheduler logs:**
-   ```bash
-   kubectl logs -n kube-system kube-scheduler-controlplane
-   # Or:
-   cat /var/log/pods/kube-system_kube-scheduler-*/kube-scheduler/*.log
-   ```
-
-### Common Root Causes
-
-#### Missing or Incorrect Kubeconfig
-**Error in logs:**
-```
-failed to get delegated authentication kubeconfig: 
-stat /etc/kubernetes/scheduler.conf: no such file or directory
-```
-
-**Solution:**
-1. Verify the scheduler.conf file exists:
-   ```bash
-   ls -la /etc/kubernetes/scheduler.conf
-   ```
-
-2. If missing, regenerate it:
-   ```bash
-   sudo kubeadm init phase kubeconfig scheduler
-   ```
-
-3. Edit the scheduler manifest if the path is incorrect:
-   ```bash
-   sudo vim /etc/kubernetes/manifests/kube-scheduler.yaml
-   ```
-
-4. Verify the kubeconfig path:
-   ```yaml
-   spec:
-     containers:
-     - command:
-       - kube-scheduler
-       - --authentication-kubeconfig=/etc/kubernetes/scheduler.conf
-       - --authorization-kubeconfig=/etc/kubernetes/scheduler.conf
-       - --kubeconfig=/etc/kubernetes/scheduler.conf
-   ```
-
-5. Ensure volume mounts are correct:
-   ```yaml
-   volumeMounts:
-   - mountPath: /etc/kubernetes/scheduler.conf
-     name: kubeconfig
-     readOnly: true
-   volumes:
-   - hostPath:
-       path: /etc/kubernetes/scheduler.conf
-       type: FileOrCreate
-     name: kubeconfig
-   ```
-
----
-
-## Scenario 6: Certificate Expiration
-
-### Problem Description
-Control plane components fail with x509 certificate errors after certificates expire.
-
-### Symptoms
-```
-unable to authenticate the request due to an error: x509: certificate has expired or is not yet valid
-```
-- API server authentication failures
-- kubectl commands fail with certificate errors
-- Control plane pods may be in CrashLoopBackOff
-
-### Diagnostic Steps
-
-1. **Check certificate expiration:**
-   ```bash
-   sudo kubeadm certs check-expiration
-   ```
-   
-   **Expected output:**
-   ```
-   CERTIFICATE                EXPIRES                  RESIDUAL TIME   CERTIFICATE AUTHORITY   EXTERNALLY MANAGED
-   admin.conf                 Dec 24, 2025 12:00 UTC   364d            ca                      no
-   apiserver                  Dec 24, 2025 12:00 UTC   364d            ca                      no
-   apiserver-etcd-client      Dec 24, 2025 12:00 UTC   364d            etcd-ca                 no
-   apiserver-kubelet-client   Dec 24, 2025 12:00 UTC   364d            ca                      no
-   controller-manager.conf    Dec 24, 2025 12:00 UTC   364d            ca                      no
-   etcd-healthcheck-client    Dec 24, 2025 12:00 UTC   364d            etcd-ca                 no
-   etcd-peer                  Dec 24, 2025 12:00 UTC   364d            etcd-ca                 no
-   etcd-server                Dec 24, 2025 12:00 UTC   364d            etcd-ca                 no
-   front-proxy-client         Dec 24, 2025 12:00 UTC   364d            front-proxy-ca          no
-   scheduler.conf             Dec 24, 2025 12:00 UTC   364d            ca                      no
-   ```
-
-### Solution
-
-#### Renew All Certificates
-
-1. **Renew all certificates:**
-   ```bash
-   sudo kubeadm certs renew all
-   ```
-
-   **Expected output:**
-   ```
-   [renew] Reading configuration from the cluster...
-   [renew] FYI: You can look at this config file with 'kubectl -n kube-system get cm kubeadm-config -o yaml'
-   
-   certificate embedded in the kubeconfig file for the admin to use and for kubeadm itself renewed
-   certificate for serving the Kubernetes API renewed
-   certificate the apiserver uses to access etcd renewed
-   certificate for the API server to connect to kubelet renewed
-   certificate embedded in the kubeconfig file for the controller manager to use renewed
-   certificate for liveness probes to healthcheck etcd renewed
-   certificate for etcd nodes to communicate with each other renewed
-   certificate for serving etcd renewed
-   certificate for the front proxy client renewed
-   certificate embedded in the kubeconfig file for the scheduler manager to use renewed
-   
-   Done renewing certificates. You must restart the kube-apiserver, kube-controller-manager, 
-   kube-scheduler and etcd, so that they can use the new certificates.
-   ```
-
-2. **Regenerate kubeconfig files:**
-   ```bash
-   sudo kubeadm init phase kubeconfig all
-   ```
-
-3. **Update your local kubeconfig:**
-   ```bash
-   sudo cp /etc/kubernetes/admin.conf ~/.kube/config
-   sudo chown $(id -u):$(id -g) ~/.kube/config
-   ```
-
-4. **Restart kubelet:**
-   ```bash
-   sudo systemctl restart kubelet
-   ```
-
-5. **Verify control plane pods restart (they should restart automatically):**
-   ```bash
-   watch kubectl get pods -n kube-system
-   ```
-
-6. **Verify the cluster is working:**
-   ```bash
-   kubectl get nodes
-   kubectl get pods -A
-   ```
-
-7. **Verify new certificate expiration dates:**
-   ```bash
-   sudo kubeadm certs check-expiration
-   ```
-
-### Prevention
-
-Set up automated certificate renewal:
-
-1. **Enable kubelet certificate rotation:**
-   ```bash
-   sudo vim /var/lib/kubelet/config.yaml
-   ```
-   
-   Add or verify:
-   ```yaml
-   rotateCertificates: true
-   ```
-
-2. **Set up a cron job for certificate renewal (optional):**
-   ```bash
-   sudo crontab -e
-   ```
-   
-   Add:
-   ```
-   0 0 1 * * /usr/bin/kubeadm certs renew all && /usr/bin/systemctl restart kubelet
-   ```
-
----
-
-## Useful Diagnostic Commands
-
-### Container Runtime Commands
+**Step 1:** Check all control plane component logs
 
 ```bash
-# List running containers
-sudo crictl ps
-
-# List all containers (including stopped)
-sudo crictl ps -a
-
-# View container logs
-sudo crictl logs <container-id>
-
-# Inspect container
-sudo crictl inspect <container-id>
+ls /var/log/pods/kube-system_kube-*
 ```
 
-### Network Diagnostics
+**Step 2:** Review specific component logs
 
 ```bash
-# Check listening ports and processes
-sudo ss -tlpn
-
-# Check established connections
-sudo ss -tnp state established
-
-# Check specific port
-sudo ss -tlpn | grep <port>
+cat /var/log/pods/kube-system_kube-apiserver-*/kube-apiserver/*.log
+cat /var/log/pods/kube-system_etcd-*/etcd/*.log
 ```
 
-### Log Locations
+**Step 3:** Verify certificate files exist
 
 ```bash
-# Kubelet logs
-sudo journalctl -u kubelet -f
-sudo journalctl -u kubelet --since "1 hour ago"
-
-# Pod logs (static pods)
-/var/log/pods/kube-system_<pod-name>_<pod-uid>/<container-name>/*.log
-
-# Containerd logs
-sudo journalctl -u containerd -f
+ls -la /etc/kubernetes/pki/
+ls -la /etc/kubernetes/pki/etcd/
 ```
 
-### Manifest Files
+#### ✅ Solution
 
-All control plane component manifests are located at:
-```
-/etc/kubernetes/manifests/
-├── etcd.yaml
-├── kube-apiserver.yaml
-├── kube-controller-manager.yaml
-└── kube-scheduler.yaml
-```
+Follow the certificate path correction steps outlined in **Scenario 2**.
 
-### Certificate Locations
+#### 📂 Certificate Directory Structure
 
 ```
 /etc/kubernetes/pki/
@@ -619,84 +363,522 @@ All control plane component manifests are located at:
     └── server.key
 ```
 
+</details>
+
 ---
 
-## General Troubleshooting Workflow
+### Scenario 4: Controller Manager Failures
 
-1. **Identify the problem:**
+<details>
+<summary><strong>📖 Click to expand</strong></summary>
+
+#### 🔴 Problem
+
+Deployments don't scale properly. Desired replica count doesn't match actual running pods.
+
+#### 🎯 Symptoms
+
+```bash
+kubectl scale deployment nginx --replicas=4
+kubectl get deployment nginx
+# Output: nginx  3/4  3  3  10m
+```
+
+- ❌ Desired state: 4 replicas
+- ❌ Current state: 3 replicas
+- 🔄 Controller manager pod not running
+
+#### 🔍 Diagnostic Steps
+
+**Step 1:** Check deployment status
+
+```bash
+kubectl get deployments
+kubectl describe deployment <deployment-name>
+```
+
+**Step 2:** Check controller manager pod
+
+```bash
+kubectl get pods -n kube-system | grep controller-manager
+```
+
+**Step 3:** Check controller manager logs
+
+```bash
+kubectl logs -n kube-system kube-controller-manager-controlplane
+# Or:
+cat /var/log/pods/kube-system_kube-controller-manager-*/kube-controller-manager/*.log
+```
+
+**Step 4:** Check kubelet logs
+
+```bash
+sudo journalctl -u kubelet -f
+```
+
+**Step 5:** Describe the controller manager pod
+
+```bash
+kubectl describe pod kube-controller-manager-controlplane -n kube-system
+```
+
+#### ⚠️ Common Root Cause: Binary Path Error
+
+**Error in logs:**
+```
+OCI runtime create failed: unable to start container process: 
+exec: "kube-controller-manager": executable file not found in $PATH
+```
+
+#### ✅ Solution
+
+**Step 1:** Edit the controller manager manifest
+
+```bash
+sudo vim /etc/kubernetes/manifests/kube-controller-manager.yaml
+```
+
+**Step 2:** Verify the command path is correct
+
+```yaml
+spec:
+  containers:
+  - command:
+    - kube-controller-manager  # ✅ Ensure this is correct
+```
+
+**Step 3:** Common typos to check
+
+| ❌ Wrong | ✅ Correct |
+|---------|-----------|
+| `ube-controller-manager` | `kube-controller-manager` |
+| `kube-controler-manager` | `kube-controller-manager` |
+| `kube_controller_manager` | `kube-controller-manager` |
+
+**Step 4:** Save and verify
+
+```bash
+sudo crictl ps | grep controller-manager
+kubectl get pods -n kube-system
+```
+
+</details>
+
+---
+
+### Scenario 5: Scheduler Configuration Issues
+
+<details>
+<summary><strong>📖 Click to expand</strong></summary>
+
+#### 🔴 Problem
+
+Pods remain in `Pending` state indefinitely without any resource constraints or affinity issues.
+
+#### 🎯 Symptoms
+
+```bash
+kubectl get pods
+# Output:
+NAME       READY   STATUS    RESTARTS   AGE
+pod-name   0/1     Pending   0          5m
+```
+
+- ⏳ Pods stuck in Pending state
+- ❌ No CrashLoopBackOff or ImagePullBackOff errors
+- 🔄 Scheduler pod not running properly
+
+#### 🔍 Diagnostic Steps
+
+**Step 1:** Check pod status
+
+```bash
+kubectl get pods
+kubectl describe pod <pod-name>
+```
+
+**Step 2:** Check scheduler pod
+
+```bash
+kubectl get pods -n kube-system | grep scheduler
+```
+
+**Step 3:** Review scheduler logs
+
+```bash
+kubectl logs -n kube-system kube-scheduler-controlplane
+# Or:
+cat /var/log/pods/kube-system_kube-scheduler-*/kube-scheduler/*.log
+```
+
+#### ⚠️ Common Root Cause: Missing or Incorrect Kubeconfig
+
+**Error in logs:**
+```
+failed to get delegated authentication kubeconfig: 
+stat /etc/kubernetes/scheduler.conf: no such file or directory
+```
+
+#### ✅ Solution
+
+**Step 1:** Verify the scheduler.conf file exists
+
+```bash
+ls -la /etc/kubernetes/scheduler.conf
+```
+
+**Step 2:** If missing, regenerate it
+
+```bash
+sudo kubeadm init phase kubeconfig scheduler
+```
+
+**Step 3:** Edit the scheduler manifest if the path is incorrect
+
+```bash
+sudo vim /etc/kubernetes/manifests/kube-scheduler.yaml
+```
+
+**Step 4:** Verify the kubeconfig path
+
+```yaml
+spec:
+  containers:
+  - command:
+    - kube-scheduler
+    - --authentication-kubeconfig=/etc/kubernetes/scheduler.conf
+    - --authorization-kubeconfig=/etc/kubernetes/scheduler.conf
+    - --kubeconfig=/etc/kubernetes/scheduler.conf
+```
+
+**Step 5:** Ensure volume mounts are correct
+
+```yaml
+volumeMounts:
+- mountPath: /etc/kubernetes/scheduler.conf
+  name: kubeconfig
+  readOnly: true
+volumes:
+- hostPath:
+    path: /etc/kubernetes/scheduler.conf
+    type: FileOrCreate
+  name: kubeconfig
+```
+
+</details>
+
+---
+
+### Scenario 6: Certificate Expiration
+
+<details>
+<summary><strong>📖 Click to expand</strong></summary>
+
+#### 🔴 Problem
+
+Control plane components fail with x509 certificate errors after certificates expire.
+
+#### 🎯 Symptoms
+
+```
+unable to authenticate the request due to an error: 
+x509: certificate has expired or is not yet valid
+```
+
+- ❌ API server authentication failures
+- ❌ kubectl commands fail with certificate errors
+- 🔄 Control plane pods may be in CrashLoopBackOff
+
+#### 🔍 Diagnostic Steps
+
+**Check certificate expiration:**
+
+```bash
+sudo kubeadm certs check-expiration
+```
+
+**Example output:**
+
+```
+CERTIFICATE                EXPIRES                  RESIDUAL TIME   CERTIFICATE AUTHORITY
+admin.conf                 Dec 24, 2025 12:00 UTC   364d            ca
+apiserver                  Dec 24, 2025 12:00 UTC   364d            ca
+apiserver-etcd-client      Dec 24, 2025 12:00 UTC   364d            etcd-ca
+apiserver-kubelet-client   Dec 24, 2025 12:00 UTC   364d            ca
+controller-manager.conf    Dec 24, 2025 12:00 UTC   364d            ca
+etcd-healthcheck-client    Dec 24, 2025 12:00 UTC   364d            etcd-ca
+etcd-peer                  Dec 24, 2025 12:00 UTC   364d            etcd-ca
+etcd-server                Dec 24, 2025 12:00 UTC   364d            etcd-ca
+front-proxy-client         Dec 24, 2025 12:00 UTC   364d            front-proxy-ca
+scheduler.conf             Dec 24, 2025 12:00 UTC   364d            ca
+```
+
+#### ✅ Solution: Renew All Certificates
+
+**Step 1:** Renew all certificates
+
+```bash
+sudo kubeadm certs renew all
+```
+
+**Expected output:**
+
+```
+[renew] Reading configuration from the cluster...
+[renew] FYI: You can look at this config file with 'kubectl -n kube-system get cm kubeadm-config -o yaml'
+
+certificate embedded in the kubeconfig file for the admin to use and for kubeadm itself renewed
+certificate for serving the Kubernetes API renewed
+certificate the apiserver uses to access etcd renewed
+certificate for the API server to connect to kubelet renewed
+certificate embedded in the kubeconfig file for the controller manager to use renewed
+certificate for liveness probes to healthcheck etcd renewed
+certificate for etcd nodes to communicate with each other renewed
+certificate for serving etcd renewed
+certificate for the front proxy client renewed
+certificate embedded in the kubeconfig file for the scheduler manager to use renewed
+
+Done renewing certificates. You must restart the kube-apiserver, kube-controller-manager, 
+kube-scheduler and etcd, so that they can use the new certificates.
+```
+
+**Step 2:** Regenerate kubeconfig files
+
+```bash
+sudo kubeadm init phase kubeconfig all
+```
+
+**Step 3:** Update your local kubeconfig
+
+```bash
+sudo cp /etc/kubernetes/admin.conf ~/.kube/config
+sudo chown $(id -u):$(id -g) ~/.kube/config
+```
+
+**Step 4:** Restart kubelet
+
+```bash
+sudo systemctl restart kubelet
+```
+
+**Step 5:** Verify control plane pods restart
+
+```bash
+watch kubectl get pods -n kube-system
+```
+
+**Step 6:** Verify the cluster is working
+
+```bash
+kubectl get nodes
+kubectl get pods -A
+```
+
+**Step 7:** Verify new certificate expiration dates
+
+```bash
+sudo kubeadm certs check-expiration
+```
+
+#### 🔒 Prevention: Automated Certificate Renewal
+
+**Option 1:** Enable kubelet certificate rotation
+
+```bash
+sudo vim /var/lib/kubelet/config.yaml
+```
+
+Add or verify:
+```yaml
+rotateCertificates: true
+```
+
+**Option 2:** Set up a cron job for certificate renewal
+
+```bash
+sudo crontab -e
+```
+
+Add:
+```bash
+# Renew certificates on the first day of each month
+0 0 1 * * /usr/bin/kubeadm certs renew all && /usr/bin/systemctl restart kubelet
+```
+
+</details>
+
+---
+
+## 📖 Quick Reference
+
+### Essential Commands
+
+#### Container Runtime Commands
+
+```bash
+# List running containers
+sudo crictl ps
+
+# List all containers (including stopped)
+sudo crictl ps -a
+
+# View container logs
+sudo crictl logs <container-id>
+
+# Inspect container
+sudo crictl inspect <container-id>
+```
+
+#### Network Diagnostics
+
+```bash
+# Check listening ports and processes
+sudo ss -tlpn
+
+# Check established connections
+sudo ss -tnp state established
+
+# Check specific port
+sudo ss -tlpn | grep <port>
+```
+
+#### Log Locations
+
+```bash
+# Kubelet logs
+sudo journalctl -u kubelet -f
+sudo journalctl -u kubelet --since "1 hour ago"
+
+# Pod logs (static pods)
+/var/log/pods/kube-system_<pod-name>_<pod-uid>/<container-name>/*.log
+
+# Containerd logs
+sudo journalctl -u containerd -f
+```
+
+### File Locations
+
+#### Manifest Files
+
+```
+/etc/kubernetes/manifests/
+├── etcd.yaml
+├── kube-apiserver.yaml
+├── kube-controller-manager.yaml
+└── kube-scheduler.yaml
+```
+
+#### Kubeconfig Files
+
+```
+/etc/kubernetes/
+├── admin.conf
+├── controller-manager.conf
+├── kubelet.conf
+└── scheduler.conf
+```
+
+## 🔄 General Troubleshooting Workflow
+
+```mermaid
+graph TD
+    A[Identify Problem] --> B[Check Pod Status]
+    B --> C{Pod Running?}
+    C -->|No| D[Check Container Status]
+    C -->|Yes| E[Check Logs]
+    D --> F[Review crictl ps -a]
+    F --> G[Check Container Logs]
+    E --> H[Identify Root Cause]
+    G --> H
+    H --> I{Configuration Error?}
+    I -->|Yes| J[Edit Manifest File]
+    I -->|No| K{Certificate Error?}
+    J --> L[Wait for Kubelet Restart]
+    K -->|Yes| M[Fix Certificates]
+    K -->|No| N[Check Other Components]
+    L --> O[Verify Fix]
+    M --> O
+    N --> O
+    O --> P{Issue Resolved?}
+    P -->|No| A
+    P -->|Yes| Q[Document Solution]
+```
+
+### Step-by-Step Process
+
+1. **🔍 Identify the problem**
    - Run kubectl commands to see what's failing
    - Check error messages carefully
 
-2. **Check control plane pod status:**
+2. **📊 Check control plane pod status**
    ```bash
    kubectl get pods -n kube-system
    sudo crictl ps -a
    ```
 
-3. **Review logs:**
-   - Check pod logs: `/var/log/pods/`
-   - Check kubelet logs: `journalctl -u kubelet`
-   - Check container logs: `crictl logs <container-id>`
+3. **📝 Review logs**
+   - Pod logs: `/var/log/pods/`
+   - Kubelet logs: `journalctl -u kubelet`
+   - Container logs: `crictl logs <container-id>`
 
-4. **Verify configurations:**
-   - Check manifest files: `/etc/kubernetes/manifests/`
-   - Verify certificates: `/etc/kubernetes/pki/`
-   - Check kubeconfig files: `/etc/kubernetes/*.conf`
+4. **⚙️ Verify configurations**
+   - Manifest files: `/etc/kubernetes/manifests/`
+   - Certificates: `/etc/kubernetes/pki/`
+   - Kubeconfig files: `/etc/kubernetes/*.conf`
 
-5. **Apply fixes:**
+5. **🔧 Apply fixes**
    - Edit manifest files (kubelet will auto-restart pods)
    - Regenerate certificates or kubeconfig if needed
    - Restart services if necessary
 
-6. **Verify the fix:**
+6. **✅ Verify the fix**
    ```bash
    kubectl get nodes
    kubectl get pods -A
    kubectl cluster-info
    ```
 
----
+## 💡 Best Practices
 
-## Best Practices
+### Before Making Changes
 
-1. **Always backup before making changes:**
-   ```bash
-   sudo cp -r /etc/kubernetes /etc/kubernetes.backup.$(date +%Y%m%d)
-   ```
+```bash
+# Always backup before making changes
+sudo cp -r /etc/kubernetes /etc/kubernetes.backup.$(date +%Y%m%d)
 
-2. **Use version control for manifest customizations:**
-   - Track changes to manifest files
-   - Document why changes were made
+# Backup specific manifest
+sudo cp /etc/kubernetes/manifests/kube-apiserver.yaml \
+       /etc/kubernetes/manifests/kube-apiserver.yaml.backup
+```
 
-3. **Monitor certificate expiration:**
-   - Set up alerts before certificates expire
-   - Automate certificate renewal where possible
+### Monitoring and Maintenance
 
-4. **Keep logs for troubleshooting:**
-   - Configure log rotation appropriately
-   - Retain logs for a reasonable period
+#### Regular Health Checks
 
-5. **Test changes in non-production first:**
-   - Validate fixes in a test environment
-   - Document the resolution steps
+```bash
+# Check component status
+kubectl get componentstatuses  # Deprecated but still useful
 
-6. **Regular health checks:**
-   ```bash
-   kubectl get componentstatuses  # Deprecated but still useful
-   kubectl get --raw='/readyz?verbose'
-   kubectl get --raw='/livez?verbose'
-   ```
+# Check readiness
+kubectl get --raw='/readyz?verbose'
 
----
+# Check liveness
+kubectl get --raw='/livez?verbose'
 
-## Contributing
+# Check nodes
+kubectl get nodes -o wide
 
-Found an issue or have a suggestion? Please open an issue or submit a pull request.
+# Check all pods
+kubectl get pods -A -o wide
+```
 
-## License
+#### Certificate Monitoring
 
-This guide is provided as-is for educational purposes.
+```bash
+# Check certificate expiration regularly
+sudo kubeadm certs check-expiration
 
----
-
-**Last Updated:** December 2025
+# Set up alert when certificates expire in 30 days
+# Add to monitoring system or create a script
+```
