@@ -1,0 +1,341 @@
+# Kubernetes Control Plane Troubleshooting – Common Scenarios
+
+This document outlines common Kubernetes **control plane troubleshooting scenarios**, observed symptoms, root causes, and step-by-step debugging approaches. It is intended for SREs, Platform Engineers, and Kubernetes administrators.
+
+---
+
+Scenario 1: API Server – Connection Refused
+
+#Symptom
+
+```bash
+kubectl get pods
+```
+
+Error:
+
+```text
+The connection to the server 172.30.1.2:6443 was refused – did you specify the right host or port?
+```
+
+---
+
+#Troubleshooting Steps
+
+##1. Verify Control Plane Node Access
+
+Ensure you are logged into the correct control-plane node:
+
+```bash
+hostname -i
+```
+
+Confirm the IP matches the API server endpoint.
+
+---
+
+##2. Check API Server Port (6443)
+
+List listening TCP ports:
+
+```bash
+sudo ss -tlpns
+```
+
+If port **6443** is not listening, the API server is not running or failed to bind.
+
+---
+
+##3. Verify Running Containers
+
+Kubernetes control plane components run as **static pods** (containers managed by kubelet).
+
+```bash
+sudo crictl ps
+sudo crictl ps -a
+```
+
+Pods are wrappers around containers; container runtime health is critical.
+
+---
+
+##4. Check API Server Logs
+
+```bash
+/var/log/pods/kube-system_kube-apiserver-controlplane_*/kube-apiserver/logs
+```
+
+Example error:
+
+```text
+Error: invalid argument "172.30.1.2222" for "--advertise-address" flag
+failed to parse IP
+```
+
+---
+
+#Root Cause
+
+* Incorrect `--advertise-address` IP
+* Invalid octet in IP address
+* Incorrect certificate paths
+
+---
+
+#Fix
+
+Edit the API server manifest:
+
+```bash
+vim /etc/kubernetes/manifests/kube-apiserver.yaml
+```
+
+Correct:
+
+* `--advertise-address`
+* Certificate file paths
+
+Kubelet will automatically restart the API server.
+
+---
+
+#Port Validation Reference
+
+| Port | Component      | Purpose            |
+| ---- | -------------- | ------------------ |
+| 6443 | kube-apiserver | Kubernetes API     |
+| 2379 | etcd           | Client requests    |
+| 2380 | etcd           | Peer communication |
+
+---
+
+Scenario 2: ETCD Troubleshooting (kubectl Commands Hanging)
+
+#Symptom
+
+```text
+error from server (timeout): the server was unable to return a response in time
+```
+
+`kubectl` commands hang or timeout.
+
+---
+
+#Root Cause
+
+* API server cannot read/write from **etcd**
+* etcd container is crashed or misconfigured
+
+---
+
+#Debug Steps
+
+##1. Check Control Plane Containers
+
+```bash
+crictl ps | grep -E "etcd|kube-apiserver"
+crictl ps -a
+```
+
+---
+
+##2. Inspect ETCD Logs
+
+```bash
+/var/log/pods/kube-system_etcd-controlplane_*/etcd
+```
+
+Example error:
+
+```text
+open /etc/kubernetes/pki/etcd/ca.crt: no such file or directory
+```
+
+---
+
+#Fix
+
+Edit ETCD manifest:
+
+```bash
+vim /etc/kubernetes/manifests/etcd.yaml
+```
+
+Ensure correct certificate paths:
+
+```text
+--trusted-ca-file=/etc/kubernetes/pki/etcd/ca.crt
+```
+
+Kubelet will restart etcd automatically.
+
+---
+
+Scenario 3: RBAC Error – Forbidden to List Pods
+
+#Symptom
+
+```text
+User "kubernetes-admin" cannot list resource "pods" in namespace "default"
+```
+
+---
+
+#Debug Steps
+
+* Check API server logs:
+
+```bash
+/var/log/pods/kube-system_kube-apiserver-*/
+```
+
+* Look for authentication errors related to service accounts (e.g., `calico-typha`).
+
+---
+
+#Key Insight
+
+* Control plane pods run with **hostNetwork** and do not depend on CNI
+* Workload pods fail if CNI is broken, not control plane pods
+
+---
+
+Scenario 4: Deployment Scaling Not Working
+
+#Symptom
+
+```bash
+kubectl scale deployment app --replicas=4
+kubectl get deploy
+```
+
+Output:
+
+```text
+READY 3/4
+```
+
+---
+
+#Root Cause
+
+* `kube-controller-manager` is unhealthy
+
+---
+
+#Debug Steps
+
+```bash
+kubectl get pods -n kube-system
+```
+
+Controller manager in `CrashLoopBackOff` state.
+
+Check logs:
+
+```bash
+/var/log/pods/kube-system_kube-controller-manager-*/
+```
+
+Example error:
+
+```text
+OCI runtime error: executable file not found in $PATH
+```
+
+---
+
+#Fix
+
+Edit manifest:
+
+```bash
+vim /etc/kubernetes/manifests/kube-controller-manager.yaml
+```
+
+Correct binary path and arguments.
+
+---
+
+Scenario 5: Pods Stuck in Pending State
+
+#Symptom
+
+* Pods remain in `Pending`
+* No image pull or crash errors
+
+---
+
+#Root Cause
+
+* Scheduler is not running
+
+---
+
+#Debug Steps
+
+```bash
+kubectl get pods -n kube-system
+```
+
+Check scheduler logs:
+
+```bash
+/var/log/pods/kube-system_kube-scheduler-controlplane_*/kube-scheduler
+```
+
+Example error:
+
+```text
+stat /etc/kubernetes/scheduler.conf: no such file or directory
+```
+
+---
+
+#Fix
+
+Verify scheduler config:
+
+```bash
+ls /etc/kubernetes/scheduler.conf
+```
+
+Correct the path in:
+
+```bash
+/etc/kubernetes/manifests/kube-scheduler.yaml
+```
+
+---
+
+Scenario 6: x509 Certificate Expired
+
+#Symptom
+
+```text
+x509: certificate has expired or is not yet valid
+```
+
+---
+
+#Check Certificate Expiry
+
+```bash
+sudo kubeadm certs check-expiration
+```
+
+---
+
+#Renew Certificates
+
+```bash
+sudo kubeadm certs renew all
+sudo kubeadm init phase kubeconfig all
+systemctl restart kubelet
+```
+
+---
+
+#
+
+---
