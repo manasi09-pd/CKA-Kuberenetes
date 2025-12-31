@@ -4,17 +4,17 @@ A comprehensive troubleshooting guide for common Kubernetes data plane issues wi
 
 📋 Table of Contents
 
-1. [Pods Stuck in Pending State](#1-pods-stuck-in-pending-state)
-2. [Pods in CrashLoopBackOff](#2-pods-in-crashloopbackoff)
-3. [Network Connectivity Failures](#3-network-connectivity-failures-between-services)
-4. [High CPU or Memory Pressure on Nodes](#4-high-cpu-or-memory-pressure-on-nodes)
-5. [CNI Plugin Failures](#5-cni-plugin-failures)
-6. [kube-proxy Issues](#6-kube-proxy-issues)
-7. [DNS Resolution Issues](#7-dns-resolution-issues)
-8. [Image Pull Errors](#8-image-pull-errors)
-9. Quick reference and list of commands 
+1. Pods Stuck in Pending State
+2. Pods in CrashLoopBackOff
+3. Network Connectivity Failures
+4. High CPU or Memory Pressure on Nodes
+5. CNI Plugin Failures
+6. kube-proxy Issues
+7. DNS Resolution Issues
+8. Image Pull Errors
+9. Quick Reference and commands 
 
-
+🔴 Problem 
 1. Pods Stuck in Pending State
 
 🔍 How It Happens
@@ -86,6 +86,7 @@ kubectl edit pod <pod-name> -n <namespace>
       value: "value"
       effect: "NoSchedule"
 
+🔴 Problem 
 2. Pods in CrashLoopBackOff
 
 🔍 How It Happens
@@ -149,7 +150,7 @@ kubectl describe pod <pod-name> -n <namespace> | grep -A 5 Readiness
 kubectl edit pod <pod-name> -n <namespace>
 # Comment out livenessProbe and readinessProbe sections
 
-4. Resource Limits:**
+4. Resource Limits:
 
 # Check if container is OOMKilled
 kubectl describe pod <pod-name> -n <namespace> | grep -i oom
@@ -159,6 +160,7 @@ kubectl edit pod <pod-name> -n <namespace>
 
 # Modify resources.limits.memory
 
+🔴 Problem 
 3. Network Connectivity Failures Between Services
 
 🔍 How It Happens
@@ -245,8 +247,6 @@ spec:
   - {}
   egress:
   - {}
-EOF
-```
 
 4. Port Mismatch:
 # Verify service port configuration
@@ -258,6 +258,7 @@ kubectl get pod <pod-name> -n <namespace> -o yaml | grep -A 3 ports
 # Test with correct port
 kubectl exec -it <pod-name> -n <namespace> -- curl <service-name>:<port>
 
+🔴 Problem 
 4. High CPU or Memory Pressure on Nodes
 
 🔍 How It Happens
@@ -354,6 +355,7 @@ kubectl scale deployment <deployment-name> -n <namespace> --replicas=<new-count>
 # Check HPA if auto-scaling is enabled
 kubectl get hpa -n <namespace>
 
+🔴 Problem 
 5. CNI Plugin Failures
 
 🔍 How It Happens
@@ -418,6 +420,7 @@ kubectl get ippools.crd.projectcalico.org -o yaml
 kubectl cluster-info dump | grep cluster-cidr
 kubectl cluster-info dump | grep service-cluster-ip-range
 
+🔴 Problem 
 6. kube-proxy Issues
 
 🔍 How It Happens
@@ -429,7 +432,6 @@ kubectl cluster-info dump | grep service-cluster-ip-range
 ⚠️ Error Messages
 Connection refused or timeouts when accessing services
 Service ClusterIP not accessible from pods
-
 
 🔧 Debugging Steps
 
@@ -476,6 +478,7 @@ kubectl run test --image=busybox --rm -it -- /bin/sh
 # Test service from inside cluster
 wget -O- <service-name>.<namespace>.svc.cluster.local:<port>
 
+🔴 Problem 
 7. DNS Resolution Issues
 
 🔍 How It Happens
@@ -513,7 +516,6 @@ kubectl run test-dns --image=busybox --rm -it -- cat /etc/resolv.conf
 # Test specific service DNS
 kubectl run test-dns --image=busybox --rm -it -- nslookup <service-name>.<namespace>.svc.cluster.local
 
-
 ✅ Solutions
 
 1. Restart CoreDNS:
@@ -543,7 +545,6 @@ kubectl get endpoints kube-dns -n kube-system
 
 # Service should typically be at 10.96.0.10 (may vary)
 
-
 4. Check Pod DNS Policy:
 
 # Verify pod DNS settings
@@ -552,7 +553,6 @@ kubectl get pod <pod-name> -n <namespace> -o yaml | grep -A 5 dnsPolicy
 # Common values: ClusterFirst, Default, None
 # Edit if incorrect
 kubectl edit pod <pod-name> -n <namespace>
-
 
 5. Test DNS Resolution:
 
@@ -569,7 +569,6 @@ spec:
     command:
       - sleep
       - "infinity"
-EOF
 
 # Test DNS queries
 kubectl exec -it dnsutils -- nslookup kubernetes.default
@@ -579,6 +578,7 @@ kubectl exec -it dnsutils -- dig <service-name>.<namespace>.svc.cluster.local
 # Clean up
 kubectl delete pod dnsutils
 
+🔴 Problem 
 8. Image Pull Errors
 
 🔍 How It Happens
@@ -594,7 +594,6 @@ Events:
   Warning  Failed     pod/my-app  Error: ImagePullBackOff
   Warning  Failed     pod/my-app  Error: ErrImagePull
   Normal   BackOff    pod/my-app  Back-off pulling image "private-registry/app:v1"
-
 
 🔧 Debugging Steps
 
@@ -629,7 +628,6 @@ kubectl edit pod <pod-name> -n <namespace>
 # Or delete and recreate with correct image
 kubectl delete pod <pod-name> -n <namespace>
 kubectl run <pod-name> --image=<correct-image>:<correct-tag> -n <namespace>
-
 
 2. Create ImagePullSecret for Private Registry:
 
@@ -739,7 +737,6 @@ kubectl get events -n <namespace> --sort-by='.lastTimestamp'
 kubectl top nodes
 kubectl top pods -n <namespace>
 
-
 Node Operations
 
 # Cordon node (mark unschedulable)
@@ -769,17 +766,14 @@ kubectl label nodes <node-name> <key>-
    kubectl explain pod.spec.containers
    kubectl explain pod.spec.tolerations
 
-
 2. Use aliases** to save time:
    alias k=kubectl
    alias kgp='kubectl get pods'
    alias kd='kubectl describe'
    alias kdp='kubectl describe pod'
 
-
 3. Use --dry-run and -o yaml** for generating manifests:
    kubectl run nginx --image=nginx --dry-run=client -o yaml > pod.yaml
-
 
 4. Always check events first:
 kubectl get events --sort-by='.lastTimestamp'
@@ -787,5 +781,3 @@ kubectl get events --sort-by='.lastTimestamp'
 5. Master grep and awk** for filtering output:
    kubectl get pods -A | grep -v Running
    kubectl get pods -o wide | awk '{print $1,$7}'
-
-ubleshooting! 🚀**
