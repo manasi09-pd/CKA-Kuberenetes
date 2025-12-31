@@ -1,0 +1,791 @@
+Kubernetes Data Plane Troubleshooting Guide
+
+A comprehensive troubleshooting guide for common Kubernetes data plane issues with debugging steps, error analysis, and solutions for CKA exam preparation.
+
+📋 Table of Contents
+
+1. [Pods Stuck in Pending State](#1-pods-stuck-in-pending-state)
+2. [Pods in CrashLoopBackOff](#2-pods-in-crashloopbackoff)
+3. [Network Connectivity Failures](#3-network-connectivity-failures-between-services)
+4. [High CPU or Memory Pressure on Nodes](#4-high-cpu-or-memory-pressure-on-nodes)
+5. [CNI Plugin Failures](#5-cni-plugin-failures)
+6. [kube-proxy Issues](#6-kube-proxy-issues)
+7. [DNS Resolution Issues](#7-dns-resolution-issues)
+8. [Image Pull Errors](#8-image-pull-errors)
+9. Quick reference and list of commands 
+
+
+1. Pods Stuck in Pending State
+
+🔍 How It Happens
+- Insufficient resources (CPU/Memory) on nodes
+- No nodes match the pod's nodeSelector/affinity rules
+- PersistentVolumeClaim not bound
+- Taints on nodes without corresponding tolerations
+
+⚠️ Error Messages
+Events:
+  Warning  FailedScheduling  pod/my-app  0/3 nodes are available: 3 Insufficient cpu.
+  Warning  FailedScheduling  pod/my-app  0/3 nodes are available: 3 node(s) didn't match Pod's node affinity/selector.
+
+🔧 Debugging Steps
+
+# Check pod status and events
+kubectl describe pod <pod-name> -n <namespace>
+
+# Check pod events specifically
+kubectl get events -n <namespace> --sort-by='.lastTimestamp'
+
+# Check node resources
+kubectl top nodes
+kubectl describe nodes
+
+# Check if any nodes are available
+kubectl get nodes
+
+# Check node taints
+kubectl describe node <node-name> | grep -i taint
+
+# Check PVC status (if applicable)
+kubectl get pvc -n <namespace>
+
+✅ Solutions
+
+1. Insufficient Resources:
+Check resource requests in pod spec
+kubectl get pod <pod-name> -n <namespace> -o yaml | grep -A 5 resources
+
+# Scale down other pods or add more nodes
+Option 1: Delete unnecessary pods
+kubectl delete pod <pod-name> -n <namespace>
+
+Option 2: Edit pod to reduce resource requests
+kubectl edit pod <pod-name> -n <namespace>
+
+2. Node Selector/Affinity Issues:
+
+# Check node labels
+kubectl get nodes --show-labels
+
+# Add required label to node
+kubectl label nodes <node-name> <label-key>=<label-value>
+
+# Or remove nodeSelector from pod
+kubectl edit pod <pod-name> -n <namespace>
+
+3. Taint/Toleration Issues:
+# Remove taint from node
+kubectl taint nodes <node-name> <taint-key>-
+
+# Or add toleration to pod spec
+kubectl edit pod <pod-name> -n <namespace>
+# Add under spec:
+ tolerations:
+    - key: "key"
+      operator: "Equal"
+      value: "value"
+      effect: "NoSchedule"
+
+2. Pods in CrashLoopBackOff
+
+🔍 How It Happens
+- Application crashes immediately after starting
+- Incorrect command or entrypoint
+- Missing environment variables or ConfigMaps
+- Failed liveness/readiness probes
+- Application bugs or misconfigurations
+
+⚠️ Error Messages
+NAME        READY   STATUS             RESTARTS   AGE
+my-app      0/1     CrashLoopBackOff   5          3m
+
+🔧 Debugging Steps
+
+# Check pod status and restart count
+kubectl get pods -n <namespace>
+
+# Describe pod to see events
+kubectl describe pod <pod-name> -n <namespace>
+
+# Check current logs
+kubectl logs <pod-name> -n <namespace>
+
+# Check previous container logs (after crash)
+kubectl logs <pod-name> -n <namespace> --previous
+
+# Check all containers in pod
+kubectl logs <pod-name> -n <namespace> -c <container-name>
+
+# Get pod YAML to review configuration
+kubectl get pod <pod-name> -n <namespace> -o yaml
+
+✅ Solutions
+
+1. Application Error:
+
+# Review logs for application errors
+kubectl logs <pod-name> -n <namespace> --previous
+
+# Check if ConfigMap/Secret exists
+kubectl get configmap -n <namespace>
+kubectl get secret -n <namespace>
+
+# Verify environment variables
+kubectl exec <pod-name> -n <namespace> -- env
+
+2. Incorrect Command/Args:
+# Check the command in pod spec
+kubectl get pod <pod-name> -n <namespace> -o yaml | grep -A 10 command
+
+# Edit and fix the command
+kubectl edit pod <pod-name> -n <namespace>
+
+3. Failed Probes:
+# Check liveness/readiness probe configuration
+kubectl describe pod <pod-name> -n <namespace> | grep -A 5 Liveness
+kubectl describe pod <pod-name> -n <namespace> | grep -A 5 Readiness
+
+# Temporarily disable probes for debugging
+kubectl edit pod <pod-name> -n <namespace>
+# Comment out livenessProbe and readinessProbe sections
+
+4. Resource Limits:**
+
+# Check if container is OOMKilled
+kubectl describe pod <pod-name> -n <namespace> | grep -i oom
+
+# Increase memory limits
+kubectl edit pod <pod-name> -n <namespace>
+
+# Modify resources.limits.memory
+
+3. Network Connectivity Failures Between Services
+
+🔍 How It Happens
+- CNI plugin not working properly
+- Network policies blocking traffic
+- Service misconfiguration
+- kube-proxy issues
+- CoreDNS failures
+
+⚠️ Error Messages
+
+curl: (7) Failed to connect to service-name port 80: Connection refused
+curl: (6) Could not resolve host: service-name
+
+🔧 Debugging Steps
+
+# Test basic pod-to-pod connectivity
+kubectl run test-pod --image=busybox --rm -it -- /bin/sh
+# Inside the pod:
+# wget -O- <pod-ip>:port
+# nslookup <service-name>
+
+# Check service endpoints
+kubectl get svc -n <namespace>
+kubectl get endpoints <service-name> -n <namespace>
+
+# Verify service selector matches pod labels
+kubectl describe svc <service-name> -n <namespace>
+kubectl get pods -n <namespace> --show-labels
+
+# Check network policies
+kubectl get networkpolicy -n <namespace>
+kubectl describe networkpolicy <policy-name> -n <namespace>
+
+# Test DNS resolution
+kubectl run test-dns --image=busybox --rm -it -- nslookup <service-name>.<namespace>.svc.cluster.local
+
+# Check pod IP and connectivity
+kubectl get pod <pod-name> -n <namespace> -o wide
+
+✅ Solutions
+
+1. Service Selector Mismatch:
+# Check if service selector matches pod labels
+kubectl get svc <service-name> -n <namespace> -o yaml | grep -A 5 selector
+kubectl get pod <pod-name> -n <namespace> --show-labels
+
+# Fix service selector
+kubectl edit svc <service-name> -n <namespace>
+
+2. No Endpoints:
+# Check if endpoints are created
+kubectl get endpoints <service-name> -n <namespace>
+
+# Ensure pods are running and match selector
+kubectl get pods -n <namespace> -l <label-key>=<label-value>
+
+# Verify pod has correct labels
+kubectl label pod <pod-name> -n <namespace> <label-key>=<label-value>
+
+3. Network Policy Blocking Traffic:
+# List all network policies
+kubectl get netpol -n <namespace>
+
+# Check policy rules
+kubectl describe netpol <policy-name> -n <namespace>
+
+# Temporarily delete policy for testing
+kubectl delete netpol <policy-name> -n <namespace>
+
+# Create allow-all policy for debugging
+kubectl apply -f - <<EOF
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-all
+  namespace: <namespace>
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - {}
+  egress:
+  - {}
+EOF
+```
+
+4. Port Mismatch:
+# Verify service port configuration
+kubectl get svc <service-name> -n <namespace> -o yaml
+
+# Check container port in pod
+kubectl get pod <pod-name> -n <namespace> -o yaml | grep -A 3 ports
+
+# Test with correct port
+kubectl exec -it <pod-name> -n <namespace> -- curl <service-name>:<port>
+
+4. High CPU or Memory Pressure on Nodes
+
+🔍 How It Happens
+- Pods without resource limits consuming excessive resources
+- Memory leaks in applications
+- Too many pods scheduled on a single node
+- Node resource exhaustion
+
+⚠️ Error Messages
+Events:
+  Warning  MemoryPressure   node/worker-1  Node has memory pressure
+  Warning  DiskPressure     node/worker-1  Node has disk pressure
+  Warning  Evicted          pod/my-app     Pod was evicted due to memory pressure
+
+🔧 Debugging Steps
+
+# Check node resource usage
+kubectl top nodes
+
+# Check pod resource usage
+kubectl top pods -n <namespace>
+kubectl top pods --all-namespaces --sort-by=memory
+kubectl top pods --all-namespaces --sort-by=cpu
+
+# Describe node to see pressure conditions
+kubectl describe node <node-name>
+
+# Check node conditions
+kubectl get nodes -o custom-columns=NAME:.metadata.name,MEMORY_PRESSURE:.status.conditions[?(@.type=="MemoryPressure")].status,DISK_PRESSURE:.status.conditions[?(@.type=="DiskPressure")].status
+
+# Check which pods are on the node
+kubectl get pods --all-namespaces -o wide | grep <node-name>
+
+# Check pod resource requests and limits
+kubectl describe pod <pod-name> -n <namespace> | grep -A 10 Limits
+
+# Check for evicted pods
+kubectl get pods --all-namespaces | grep Evicted
+
+✅ Solutions
+
+1. Set Resource Limits:
+
+# Add resource limits to pod
+kubectl edit pod <pod-name> -n <namespace>
+# Add under containers:
+   resources:
+     requests:
+       memory: "64Mi"
+       cpu: "250m"
+     limits:
+       memory: "128Mi"
+       cpu: "500m"
+
+# Set default limits using LimitRange
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: default-limit-range
+  namespace: <namespace>
+spec:
+  limits:
+  - default:
+      cpu: "500m"
+      memory: "512Mi"
+    defaultRequest:
+      cpu: "250m"
+      memory: "256Mi"
+    type: Container
+EOF
+
+2. Evict Pods from Overloaded Node:
+# Cordon node to prevent new pods
+kubectl cordon <node-name>
+
+# Drain node (evict pods)
+kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data
+
+# Uncordon after resolving issues
+kubectl uncordon <node-name>
+
+3. Clean Up Evicted Pods:
+# Delete all evicted pods
+kubectl get pods --all-namespaces | grep Evicted | awk '{print $2 " -n " $1}' | xargs kubectl delete pod
+
+# Or using field selector
+kubectl delete pods --all-namespaces --field-selector=status.phase=Failed
+
+4. Scale Down Pods:**
+# Reduce replica count
+kubectl scale deployment <deployment-name> -n <namespace> --replicas=<new-count>
+
+# Check HPA if auto-scaling is enabled
+kubectl get hpa -n <namespace>
+
+5. CNI Plugin Failures
+
+🔍 How It Happens
+- CNI plugin pods not running
+- Network plugin misconfiguration
+- Missing CNI binaries on nodes
+- IP address exhaustion in pod CIDR
+
+⚠️ Error Messages
+Events:
+  Warning  FailedCreatePodSandBox  pod/my-app  Failed to create pod sandbox: rpc error: code = Unknown desc = failed to setup network for sandbox: NetworkPlugin cni failed
+
+🔧 Debugging Steps
+
+# Check CNI pods status (depends on CNI plugin)
+kubectl get pods -n kube-system | grep -E 'calico|flannel|weave|cilium'
+
+# Describe CNI pods
+kubectl describe pod <cni-pod-name> -n kube-system
+
+# Check CNI logs
+kubectl logs <cni-pod-name> -n kube-system
+
+# Check CNI configuration on node (SSH to node)
+ls -la /etc/cni/net.d/
+cat /etc/cni/net.d/*
+
+# Check CNI binaries
+ls -la /opt/cni/bin/
+
+# Check pod network status
+kubectl get pods -o wide --all-namespaces
+
+# Verify pod CIDR is configured
+kubectl cluster-info dump | grep -i cidr
+
+✅ Solutions
+
+1. Restart CNI Pods:
+
+# Delete CNI pods to force restart
+kubectl delete pod <cni-pod-name> -n kube-system
+
+# Or rollout restart daemonset
+kubectl rollout restart daemonset <cni-daemonset> -n kube-system
+
+2. Reinstall the DNS PLUGIN
+
+# Example for Calico
+kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+
+# Example for Flannel
+kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+
+# Example for Weave
+kubectl apply -f "https://cloud.weave.works/k8s/net?k8s-version=$(kubectl version | base64 | tr -d '\n')"
+
+# For Calico
+kubectl get ippools.crd.projectcalico.org -o yaml
+
+# Check pod CIDR range
+kubectl cluster-info dump | grep cluster-cidr
+kubectl cluster-info dump | grep service-cluster-ip-range
+
+6. kube-proxy Issues
+
+🔍 How It Happens
+- kube-proxy pods not running
+- iptables rules not updated
+- IPVS mode misconfiguration
+- Service traffic not load balanced
+
+⚠️ Error Messages
+Connection refused or timeouts when accessing services
+Service ClusterIP not accessible from pods
+
+
+🔧 Debugging Steps
+
+# Check kube-proxy pods
+kubectl get pods -n kube-system | grep kube-proxy
+
+# Describe kube-proxy pod
+kubectl describe pod <kube-proxy-pod> -n kube-system
+
+# Check kube-proxy logs
+kubectl logs <kube-proxy-pod> -n kube-system
+
+# Check kube-proxy configuration
+kubectl get configmap kube-proxy -n kube-system -o yaml
+
+# Check iptables rules on node (SSH to node)
+sudo iptables-save | grep <service-name>
+
+# Check if kube-proxy is using iptables or IPVS
+kubectl logs <kube-proxy-pod> -n kube-system | grep -i mode
+
+✅ Solutions
+
+1. Restart kube-proxy:
+
+# Delete kube-proxy pod to restart
+kubectl delete pod <kube-proxy-pod> -n kube-system
+
+# Or restart the daemonset
+kubectl rollout restart daemonset kube-proxy -n kube-system
+
+2. Verify Service Configuration:
+# Check service and endpoints
+kubectl get svc <service-name> -n <namespace>
+kubectl get endpoints <service-name> -n <namespace>
+
+# Ensure ClusterIP is from service CIDR range
+kubectl cluster-info dump | grep service-cluster-ip-range
+
+3. Test Service Connectivity:
+# Create test pod
+kubectl run test --image=busybox --rm -it -- /bin/sh
+
+# Test service from inside cluster
+wget -O- <service-name>.<namespace>.svc.cluster.local:<port>
+
+7. DNS Resolution Issues
+
+🔍 How It Happens
+- CoreDNS pods not running
+- DNS service misconfigured
+- Network policies blocking DNS traffic
+- Incorrect resolv.conf in pods
+
+⚠️ Error Messages
+
+nslookup: can't resolve 'service-name'
+curl: (6) Could not resolve host: service-name
+Temporary failure in name resolution
+
+🔧 Debugging Steps
+
+# Check CoreDNS pods
+kubectl get pods -n kube-system | grep coredns
+
+# Describe CoreDNS pods
+kubectl describe pod <coredns-pod> -n kube-system
+
+# Check CoreDNS logs
+kubectl logs <coredns-pod> -n kube-system
+
+# Check DNS service
+kubectl get svc -n kube-system | grep kube-dns
+
+# Test DNS from a pod
+kubectl run test-dns --image=busybox --rm -it -- nslookup kubernetes.default
+
+# Check DNS configuration in pod
+kubectl run test-dns --image=busybox --rm -it -- cat /etc/resolv.conf
+
+# Test specific service DNS
+kubectl run test-dns --image=busybox --rm -it -- nslookup <service-name>.<namespace>.svc.cluster.local
+
+
+✅ Solutions
+
+1. Restart CoreDNS:
+# Delete CoreDNS pods
+kubectl delete pod -n kube-system -l k8s-app=kube-dns
+
+# Or rollout restart deployment
+kubectl rollout restart deployment coredns -n kube-system
+
+2. Check CoreDNS ConfigMap:
+# View CoreDNS configuration
+kubectl get configmap coredns -n kube-system -o yaml
+
+# Edit if needed
+kubectl edit configmap coredns -n kube-system
+
+# After editing, restart CoreDNS
+kubectl rollout restart deployment coredns -n kube-system
+
+3. Verify DNS Service:
+
+# Check kube-dns service
+kubectl get svc kube-dns -n kube-system
+
+# Ensure it has endpoints
+kubectl get endpoints kube-dns -n kube-system
+
+# Service should typically be at 10.96.0.10 (may vary)
+
+
+4. Check Pod DNS Policy:
+
+# Verify pod DNS settings
+kubectl get pod <pod-name> -n <namespace> -o yaml | grep -A 5 dnsPolicy
+
+# Common values: ClusterFirst, Default, None
+# Edit if incorrect
+kubectl edit pod <pod-name> -n <namespace>
+
+
+5. Test DNS Resolution:
+
+# Create debug pod with DNS tools
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dnsutils
+spec:
+  containers:
+  - name: dnsutils
+    image: registry.k8s.io/e2e-test-images/jessie-dnsutils:1.3
+    command:
+      - sleep
+      - "infinity"
+EOF
+
+# Test DNS queries
+kubectl exec -it dnsutils -- nslookup kubernetes.default
+kubectl exec -it dnsutils -- nslookup <service-name>.<namespace>.svc.cluster.local
+kubectl exec -it dnsutils -- dig <service-name>.<namespace>.svc.cluster.local
+
+# Clean up
+kubectl delete pod dnsutils
+
+8. Image Pull Errors
+
+🔍 How It Happens
+- Image doesn't exist in registry
+- Authentication failure to private registry
+- Network issues reaching registry
+- Wrong image name or tag
+- ImagePullPolicy misconfiguration
+
+⚠️ Error Messages
+Events:
+  Warning  Failed     pod/my-app  Failed to pull image "nginx:wrongtag": rpc error: code = Unknown desc = Error response from daemon: manifest for nginx:wrongtag not found
+  Warning  Failed     pod/my-app  Error: ImagePullBackOff
+  Warning  Failed     pod/my-app  Error: ErrImagePull
+  Normal   BackOff    pod/my-app  Back-off pulling image "private-registry/app:v1"
+
+
+🔧 Debugging Steps
+
+# Check pod status
+kubectl get pods -n <namespace>
+
+# Describe pod to see image pull errors
+kubectl describe pod <pod-name> -n <namespace>
+
+# Check events
+kubectl get events -n <namespace> --sort-by='.lastTimestamp' | grep -i pull
+
+# Verify image name and tag
+kubectl get pod <pod-name> -n <namespace> -o yaml | grep -A 2 image:
+
+# Check imagePullSecrets
+kubectl get pod <pod-name> -n <namespace> -o yaml | grep -A 2 imagePullSecrets
+
+# List secrets in namespace
+kubectl get secrets -n <namespace>
+
+# Check if image exists (from node or local)
+docker pull <image-name>:<tag>
+
+✅ Solutions
+
+1. Correct Image Name:**
+
+# Fix image name/tag in pod spec
+kubectl edit pod <pod-name> -n <namespace>
+
+# Or delete and recreate with correct image
+kubectl delete pod <pod-name> -n <namespace>
+kubectl run <pod-name> --image=<correct-image>:<correct-tag> -n <namespace>
+
+
+2. Create ImagePullSecret for Private Registry:
+
+# Create docker-registry secret
+kubectl create secret docker-registry regcred \
+  --docker-server=<registry-url> \
+  --docker-username=<username> \
+  --docker-password=<password> \
+  --docker-email=<email> \
+  -n <namespace>
+
+# Verify secret
+kubectl get secret regcred -n <namespace> -o yaml
+
+# Add secret to pod
+kubectl edit pod <pod-name> -n <namespace>
+Add under spec:
+   imagePullSecrets:
+     - name: regcred
+
+# Or set as default for service account
+kubectl patch serviceaccount default -n <namespace> -p '{"imagePullSecrets": [{"name": "regcred"}]}'
+
+3. Fix ImagePullPolicy:**
+
+# Check current imagePullPolicy
+kubectl get pod <pod-name> -n <namespace> -o yaml | grep imagePullPolicy
+
+# Edit policy (Always, IfNotPresent, Never)
+kubectl edit pod <pod-name> -n <namespace>
+# Change imagePullPolicy under containers section
+
+# For local testing, use IfNotPresent or Never
+# For production, use Always or IfNotPresent
+
+4. Test Image Pull Manually:**
+
+# SSH to node or use debug container
+kubectl debug node/<node-name> -it --image=ubuntu
+
+# Try pulling image manually
+crictl pull <image-name>:<tag>
+
+# Or using docker (if available)
+docker pull <image-name>:<tag>
+
+5. Check Registry Connectivity:**
+
+# Test network connectivity to registry
+kubectl run test-net --image=busybox --rm -it -- wget -O- <registry-url>
+
+# Check if DNS resolves registry
+kubectl run test-dns --image=busybox --rm -it -- nslookup <registry-domain>
+
+6. Common ImagePullPolicy Scenarios:
+
+# Always pull image (good for latest tag)
+imagePullPolicy: Always
+
+# Pull only if not present locally (good for versioned tags)
+imagePullPolicy: IfNotPresent
+
+# Never pull, must exist locally (for offline/airgapped environments)
+imagePullPolicy: Never
+
+🎯 Quick Reference Commands
+
+Essential Debugging Commands
+
+# Get all resources in namespace
+kubectl get all -n <namespace>
+
+# Wide output with more details
+kubectl get pods -n <namespace> -o wide
+
+# Watch for changes
+kubectl get pods -n <namespace> -w
+
+# Get YAML definition
+kubectl get pod <pod-name> -n <namespace> -o yaml
+
+# Edit resource
+kubectl edit pod <pod-name> -n <namespace>
+
+# Describe resource (events + details)
+kubectl describe pod <pod-name> -n <namespace>
+
+# Get logs
+kubectl logs <pod-name> -n <namespace>
+kubectl logs <pod-name> -n <namespace> --previous
+kubectl logs <pod-name> -n <namespace> -c <container-name>
+
+# Execute command in pod
+kubectl exec -it <pod-name> -n <namespace> -- /bin/sh
+
+# Port forwarding for testing
+kubectl port-forward pod/<pod-name> 8080:80 -n <namespace>
+
+# Copy files from/to pod
+kubectl cp <pod-name>:/path/to/file ./local-file -n <namespace>
+kubectl cp ./local-file <pod-name>:/path/to/file -n <namespace>
+
+# Get events
+kubectl get events -n <namespace> --sort-by='.lastTimestamp'
+
+# Check resource usage
+kubectl top nodes
+kubectl top pods -n <namespace>
+
+
+Node Operations
+
+# Cordon node (mark unschedulable)
+kubectl cordon <node-name>
+
+# Uncordon node
+kubectl uncordon <node-name>
+
+# Drain node (evict pods)
+kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data
+
+# Describe node
+kubectl describe node <node-name>
+
+# Get node labels
+kubectl get nodes --show-labels
+
+# Add label to node
+kubectl label nodes <node-name> <key>=<value>
+
+# Remove label from node
+kubectl label nodes <node-name> <key>-
+
+📝 CKA Exam Tips
+
+1. Use kubectl explain** for quick reference:
+   kubectl explain pod.spec.containers
+   kubectl explain pod.spec.tolerations
+
+
+2. Use aliases** to save time:
+   alias k=kubectl
+   alias kgp='kubectl get pods'
+   alias kd='kubectl describe'
+   alias kdp='kubectl describe pod'
+
+
+3. Use --dry-run and -o yaml** for generating manifests:
+   kubectl run nginx --image=nginx --dry-run=client -o yaml > pod.yaml
+
+
+4. Always check events first:
+kubectl get events --sort-by='.lastTimestamp'
+
+5. Master grep and awk** for filtering output:
+   kubectl get pods -A | grep -v Running
+   kubectl get pods -o wide | awk '{print $1,$7}'
+
+ubleshooting! 🚀**
