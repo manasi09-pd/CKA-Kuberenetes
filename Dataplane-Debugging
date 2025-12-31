@@ -1,0 +1,66 @@
+Kubernetes Data Plane – Introduction
+
+Overview
+
+The Kubernetes **data plane** is responsible for running application workloads and enforcing the desired state defined by the control plane. It consists of the worker nodes and the core components that execute pods, manage networking, and provide runtime isolation. While the control plane makes decisions, the data plane performs the actual work of running containers and serving traffic.
+
+At a high level, the data plane ensures that:
+
+- Application pods are created, started, stopped, and restarted as required
+- Network connectivity between pods, services, and external endpoints is maintained
+- Resource limits and isolation (CPU, memory) are enforced
+- Node-level health and status are continuously reported back to the control plane
+
+Core Components of the Kubernetes Data Plane
+
+🖥️ Worker Node
+Each worker node hosts application workloads and runs the components required to execute pods. Nodes can be physical machines or virtual instances.
+
+🤖 kubelet
+The kubelet is the primary node agent. It communicates with the control plane, receives pod specifications, and ensures the defined containers are running. It also reports node and pod status back to the API server.
+
+📦 Container Runtime
+The container runtime (such as `containerd` or `CRI-O`) is responsible for pulling images, creating containers, and managing their lifecycle. Pods are abstractions; the runtime executes the actual containers.
+
+🔀 kube-proxy
+kube-proxy implements Kubernetes Service networking. It programs `iptables` or `IPVS` rules to enable load balancing and service discovery for pod-to-pod and external traffic.
+
+🌐 Container Network Interface (CNI)
+The CNI plugin (e.g., Calico, Cilium, Flannel) provides pod networking. It assigns IP addresses to pods, enables pod-to-pod communication across nodes, and enforces network policies when applicable.
+
+Responsibilities of the Data Plane
+
+The data plane is responsible for:
+
+- ✅ Executing application workloads
+- ✅ Enforcing resource requests and limits
+- ✅ Handling pod-level networking and service routing
+- ✅ Maintaining node-level health
+- ✅ Applying network and security policies at runtime
+
+⚠️ Note: Any failure in the data plane typically impacts application availability, while the control plane may still remain operational.
+
+Data Plane vs Control Plane
+
+| Control Plane | Data Plane |
+|--------------|-----------|
+| Schedules pods | Runs application workloads |
+| Stores cluster state in etcd | Enforces scheduling decisions |
+| Exposes the Kubernetes API | Handles networking and traffic |
+| Makes decisions about desired state | Executes containers on nodes |
+
+Operational Perspective (SRE View)
+
+From an SRE perspective, data plane issues usually manifest as:
+
+- 🔴 Pods stuck in `Pending` or `CrashLoopBackOff`
+- 🔴 Network connectivity failures between services
+- 🔴 High CPU or memory pressure on nodes
+- 🔴 CNI or kube-proxy failures impacting traffic routing
+
+Effective monitoring of node metrics, pod health, and network performance is critical to maintaining data plane reliability.
+
+📚 Resources
+
+- [Kubernetes Official Documentation](https://kubernetes.io/docs/)
+- [CNCF Kubernetes](https://www.cncf.io/projects/kubernetes/)
