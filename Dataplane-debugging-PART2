@@ -1,0 +1,821 @@
+Kubernetes Data Plane - Real-World Troubleshooting Scenarios
+
+Complete troubleshooting guide with actual scenarios, commands, and solutions for CKA exam preparation.
+
+📋 Table of Contents
+
+1. [Scenario 1: Worker Node in Unhealthy State]
+2. [Scenario 2: Worker Node Not Ready - Swap Issue]
+3. [Scenario 3: Worker Node Down - Certificate Issue]
+4. [Scenario 4: Node Not Ready - CNI Plugin Issue]
+5. [Scenario 5: Service Not Accessible - Selector Mismatch]
+6. [Scenario 6: DNS Resolution Failure - CoreDNS Not Running]
+
+Scenario 1: Worker Node in Unhealthy State
+
+🔍 Problem Description
+- Worker node shows as `NotReady` in cluster
+- Pods running on the worker node are still running initially
+- After 5 minutes, pods are automatically evicted
+- Pods go into `Pending` state as the node has taints preventing scheduling
+
+📊 Initial Observation
+
+# Check cluster version
+kubectl version
+Output:
+Client Version: v1.34.3
+Server Version: v1.34.3
+
+# Check node status
+kubectl get nodes
+
+Expected Output:
+NAME           STATUS      ROLES           AGE   VERSION
+controlplane   Ready       control-plane   12d   v1.34.3
+node01         NotReady    <none>          12d   v1.34.3
+
+🔧 Debugging Steps
+
+Step 1: Describe the Node
+kubectl describe nodes node01
+
+What to Look For:
+- **Taints**: Check if node has taints like `node.kubernetes.io/unreachable:NoExecute`
+- **Conditions**: Look at `Ready`, `MemoryPressure`, `DiskPressure` conditions
+- **Events**: Check for any recent events
+
+Sample Output:
+Taints:             node.kubernetes.io/unreachable:NoExecute
+                    node.kubernetes.io/not-ready:NoExecute
+Conditions:
+  Type             Status    Reason
+  ----             ------    ------
+  Ready            Unknown   NodeStatusUnknown
+  MemoryPressure   Unknown   NodeStatusUnknown
+  DiskPressure     Unknown   NodeStatusUnknown
+
+Step 2: Check Pod Status
+# Check pods on the affected node
+kubectl get pods -o wide | grep node01
+
+# Check for pending pods
+kubectl get pods -A | grep Pending
+
+Step 3: SSH to Worker Node and Check kubelet
+# SSH to the worker node
+ssh node01
+
+# Check kubelet service status
+sudo systemctl status kubelet
+
+Healthy Output Should Show:
+● kubelet.service - kubelet: The Kubernetes Node Agent
+   Loaded: loaded (/usr/lib/systemd/system/kubelet.service; enabled)
+   Active: active (running) since Wed 2025-12-31 11:33:41 UTC; 8min ago
+   Main PID: 1213 (kubelet)
+
+Problem Indicators:
+- Status showing `inactive (dead)` or `failed`
+- Recent errors in the service logs
+
+Step 4: Check kubelet Logs
+# Check kubelet logs for errors
+sudo journalctl -u kubelet --no-pager | tail -50
+
+# Or check recent logs
+sudo journalctl -u kubelet -n 100 --no-pager
+
+Common Errors to Look For:
+E1231 11:34:28.009293 1213 pod_workers.go:1324] "Error syncing pod, skipping"
+E1231 11:34:28.010366 1213 log.go:32] "StopPodSandbox from runtime service failed"
+
+ ✅ Understanding the Issue
+
+**Pod Eviction Process:**
+1. When node becomes `NotReady`, Kubernetes applies taints automatically:
+   - `node.kubernetes.io/not-ready:NoExecute`
+   - `node.kubernetes.io/unreachable:NoExecute`
+
+2. Default Eviction Timeout: 5 minutes (300 seconds)
+   - Controlled by `--pod-eviction-timeout` flag on kube-controller-manager
+
+3. Lifecycle Controller evicts pods after timeout expires
+
+4. Scheduler attempts to reschedule pods on healthy nodes
+
+5. If no suitable nodes available, pods remain in `Pending` state
+
+🔧 Solution Steps
+
+Solution 1: Restart kubelet Service
+
+# On the worker node
+sudo systemctl restart kubelet
+
+# Verify it's running
+sudo systemctl status kubelet
+
+# Check if node becomes Ready
+kubectl get nodes
+
+# Check for more detailed errors
+sudo journalctl -u kubelet -xe
+
+# Check kubelet configuration
+cat /var/lib/kubelet/config.yaml
+
+# Verify kubelet binary
+which kubelet
+kubelet --version
+
+Solution 3: Check Container Runtime
+# Check if containerd/docker is running
+sudo systemctl status containerd
+# OR
+sudo systemctl status docker
+
+# Restart if needed
+sudo systemctl restart containerd
+
+📝 Verification
+
+# From control plane, verify node is Ready
+kubectl get nodes
+
+# Check if pods are scheduled back
+kubectl get pods -o wide
+
+# Verify no taints on node
+kubectl describe node node01 | grep -i taint
+
+Scenario 2: Worker Node Not Ready - Swap Issue
+
+🔍 Problem Description
+- Worker node shows `NotReady` status
+- `kubectl describe nodes` doesn't show specific error
+- kubelet service is failed/inactive
+
+📊 Initial Observation
+kubectl get nodes
+
+Output:
+NAME           STATUS      ROLES           AGE   VERSION
+controlplane   Ready       control-plane   12d   v1.34.3
+node01         NotReady    <none>          12d   v1.34.3
+
+🔧 Debugging Steps
+
+Step 1: Describe Node
+kubectl describe nodes node01
+
+Output Shows:
+Conditions:
+  Type             Status
+  ----             ------
+  Ready            False
+  
+Events:
+  Type     Reason                   Message
+  ----     ------                   -------
+  Normal   NodeNotReady             Node node01 status is now: NodeNotReady
+
+Step 2: SSH to Node and Check kubelet
+ssh node01
+
+sudo systemctl status kubelet
+
+Problem Output:
+● kubelet.service - kubelet: The Kubernetes Node Agent
+   Loaded: loaded (/usr/lib/systemd/system/kubelet.service; enabled)
+   Active: failed (Result: exit-code)
+   Process: ExitCode=1/failure
+
+Step 3: Check kubelet Logs
+sudo journalctl -u kubelet --no-pager | tail -50
+
+Error Message Found:
+E1231 12:15:30.123456 1234 server.go:294] "Failed to run kubelet" err="running with swap on is not supported, please disable swap! or set --fail-swap-on flag to false"
+
+⚠️ Understanding the Issue
+
+Why Kubernetes Doesn't Support Swap:
+- Swap is slower than RAM (uses disk/SSD)
+- Kubernetes cannot guarantee real memory allocation with swap enabled
+- Performance becomes unpredictable
+- Resource limits cannot be enforced accurately
+
+**Swap in Linux:**
+- OS offloads memory pages to disk when RAM is full
+- Creates performance degradation
+- Not suitable for containerized workloads
+
+🔧 Solution Steps
+
+Step 1: Check Current Swap Status
+# Check if swap is enabled
+swapon --show
+
+Output if Swap is Active:
+NAME       TYPE  SIZE  USED  PRIO
+/swapfile  file  2G    0B    -2
+
+Step 2: Check Memory Usage
+free -h
+
+Example Output:
+              total        used        free      shared  buff/cache   available
+Mem:           1.9Gi       510Mi       255Mi       1.8Mi       1.3Gi       1.4Gi
+Swap:          2.0Gi          0B       2.0Gi
+
+Step 3: Disable Swap Temporarily
+# Turn off swap immediately
+sudo swapoff -a
+
+# Verify swap is disabled
+swapon --show
+# Should show nothing
+
+free -h
+# Swap line should show 0B
+
+Step 4: Disable Swap Permanently
+# Edit /etc/fstab to prevent swap on reboot
+sudo sed -i '/ swap / s/^\(.*\)$/#\1/g' /etc/fstab
+
+# Or manually edit and comment out swap line
+sudo vi /etc/fstab
+# Comment out line containing "swap", example:
+# /swapfile none swap sw 0 0
+
+Step 5: Remove Swap File (Optional)
+# Remove swap file if it exists
+sudo rm -f /swapfile
+
+Step 6: Restart kubelet
+sudo systemctl restart kubelet
+
+# Verify service is running
+sudo systemctl status kubelet
+
+📝 Verification
+# Check node status from control plane
+kubectl get nodes
+
+# Should show Ready
+NAME           STATUS   ROLES           AGE   VERSION
+controlplane   Ready    control-plane   12d   v1.34.3
+node01         Ready    <none>          12d   v1.34.3
+
+# Verify swap is disabled
+ssh node01 'free -h | grep Swap'
+# Should show: Swap: 0B 0B 0B
+
+🎯 Alternative: Allow Swap (Not Recommended)
+# If you must run with swap (NOT recommended for production)
+sudo vi /var/lib/kubelet/kubeadm-flags.env
+
+# Add: --fail-swap-on=false
+KUBELET_KUBEADM_ARGS="--fail-swap-on=false ..."
+
+sudo systemctl restart kubelet
+ 
+Scenario 3: Worker Node Down - Certificate Issue
+
+🔍 Problem Description
+- Worker node is completely down
+- kubelet service is not running
+- `kubectl describe nodes` shows generic "NodeNotReady" message
+- Issue is with kubelet client certificates
+
+📊 Initial Observation
+kubectl get nodes
+
+Output:
+NAME           STATUS      ROLES           AGE   VERSION
+controlplane   Ready       control-plane   12d   v1.34.3
+node01         NotReady    <none>          12d   v1.34.3
+
+🔧 Debugging Steps
+
+Step 1: Describe Node
+kubectl describe nodes node01
+
+Output:
+Conditions:
+  Type             Status
+  ----             ------
+  Ready            Unknown
+  
+Events:
+  Type     Reason           Message
+  ----     ------           -------
+  Normal   NodeNotReady     Node node01 status is now: NodeNotReady (no specific error)
+
+Step 2: Check kubelet Service
+ssh node01
+
+sudo systemctl status kubelet
+
+Output:
+● kubelet.service - kubelet: The Kubernetes Node Agent
+   Loaded: loaded
+   Active: inactive (dead)
+
+
+Step 3: Check kubelet Logs
+sudo journalctl -u kubelet --no-pager | tail -100
+
+# Or check for errors specifically
+sudo journalctl -u kubelet -p err --no-pager
+
+Error Messages Found:
+E1231 14:30:15.123456 2345 server.go:302] "Failed to run kubelet" err="unable to load bootstrap kubeconfig: stat /etc/kubernetes/bootstrap-kubelet.conf: no such file or directory"
+
+E1231 14:30:15.234567 2345 server.go:302] "Failed to run kubelet" err="unable to read client-cert /var/lib/kubelet/pki/kubelet-client-current-wrong.pem"
+
+E1231 14:30:15.345678 2345 certificate_manager.go:123] "Failed to initialize certificate manager" err="unable to read existing bootstrap kubeconfig"
+
+
+⚠️ Understanding the Issue
+
+kubelet Certificate Authentication:
+1. kubelet uses client certificates to authenticate with API server
+2. Certificates are stored in `/var/lib/kubelet/pki/`
+3. Configuration file at `/etc/kubernetes/kubelet.conf` points to these certificates
+4. Wrong path in config → kubelet can't authenticate → node goes down
+
+🔧 Solution Steps
+
+Step 1: Check Certificate Directory
+# List certificates in kubelet pki directory
+ls -la /var/lib/kubelet/pki/
+
+Output:
+total 16
+drwxr-xr-x 2 root root 4096 Dec 18 17:59 .
+drwxr-xr-x 3 root root 4096 Dec 31 14:00 ..
+-rw------- 1 root root 1234 Dec 18 17:59 kubelet-client-2025-12-18-17-59-20.pem
+-rw------- 1 root root 1234 Dec 18 17:59 kubelet-client-current.pem
+-rw-r--r-- 1 root root 1234 Dec 18 17:59 kubelet.crt
+-rw------- 1 root root 1679 Dec 18 17:59 kubelet.key
+
+Note: The correct certificate file is `kubelet-client-current.pem`
+Step 2: Check kubelet Configuration
+# View kubelet kubeconfig
+sudo cat /etc/kubernetes/kubelet.conf
+
+Wrong Configuration Found:
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: DATA
+    server: https://172.30.1.2:6443
+  name: default-cluster
+contexts:
+- context:
+    cluster: default-cluster
+    namespace: default
+    user: default-auth
+  name: default-context
+current-context: default-context
+kind: Config
+users:
+- name: default-auth
+  user:
+    client-certificate: /var/lib/kubelet/pki/kubelet-client-current-wrong.pem  # WRONG PATH
+    client-key: /var/lib/kubelet/pki/kubelet-client-current-wrong.pem         # WRONG PATH
+
+Step 3: Fix Certificate Path
+# Backup the current config
+sudo cp /etc/kubernetes/kubelet.conf /etc/kubernetes/kubelet.conf.backup
+
+# Edit the configuration file
+sudo vi /etc/kubernetes/kubelet.conf
+
+Correct Configuration:
+users:
+- name: default-auth
+  user:
+    client-certificate: /var/lib/kubelet/pki/kubelet-client-current.pem  # CORRECTED
+    client-key: /var/lib/kubelet/pki/kubelet-client-current.pem         # CORRECTED
+
+Or use sed to fix it:
+sudo sed -i 's/kubelet-client-current-wrong.pem/kubelet-client-current.pem/g' /etc/kubernetes/kubelet.conf
+
+Step 4: Verify the Fix
+# Check the corrected configuration
+sudo cat /etc/kubernetes/kubelet.conf | grep client-certificate
+
+Output:
+    client-certificate: /var/lib/kubelet/pki/kubelet-client-current.pem
+    client-key: /var/lib/kubelet/pki/kubelet-client-current.pem
+
+Step 5: Restart kubelet
+sudo systemctl restart kubelet
+
+# Check status
+sudo systemctl status kubelet
+
+Healthy Output:
+● kubelet.service - kubelet: The Kubernetes Node Agent
+   Active: active (running)
+
+📝 Verification
+# From control plane
+kubectl get nodes
+
+# Expected output:
+NAME           STATUS   ROLES           AGE   VERSION
+controlplane   Ready    control-plane   12d   v1.34.3
+node01         Ready    <none>          12d   v1.34.3
+
+# Verify no certificate errors in logs
+ssh node01 'sudo journalctl -u kubelet -n 20 --no-pager'
+
+🎯 Additional Certificate Troubleshooting
+
+# Check certificate expiration
+openssl x509 -in /var/lib/kubelet/pki/kubelet-client-current.pem -noout -enddate
+
+# Verify certificate details
+openssl x509 -in /var/lib/kubelet/pki/kubelet-client-current.pem -noout -text
+
+# Check certificate permissions
+ls -l /var/lib/kubelet/pki/kubelet-client-current.pem
+# Should be: -rw------- (600)
+
+# If permissions are wrong:
+sudo chmod 600 /var/lib/kubelet/pki/kubelet-client-current.pem
+
+Scenario 4: Node Not Ready - CNI Plugin Issue
+
+🔍 Problem Description
+- Worker node shows `NotReady` status
+- Recent events don't show proper errors
+- kubelet is running but showing network plugin errors
+- CNI configuration is missing or misconfigured
+
+📊 Initial Observation
+kubectl get nodes
+
+Output:
+NAME           STATUS      ROLES           AGE   VERSION
+controlplane   Ready       control-plane   12d   v1.34.3
+node01         NotReady    <none>          12d   v1.34.3
+
+🔧 Debugging Steps
+
+Step 1: Describe Node
+kubectl describe nodes node01
+
+Output:
+Conditions:
+  Type             Status   Reason
+  ----             ------   ------
+  Ready            False    NetworkPluginNotReady
+  
+Events:
+  Type     Reason                   Message
+  ----     ------                   -------
+Warning  NetworkPluginNotReady    Network plugin returns error: NetworkPlugin is not ready
+
+Step 2: Check kubelet Status
+ssh node01
+
+sudo systemctl status kubelet
+
+Output:
+● kubelet.service - kubelet: The Kubernetes Node Agent
+   Active: active (running)  # Service is running!
+   
+   # But logs show errors:
+   Dec 31 16:45:12 node01 kubelet[1234]: E1231 16:45:12.123456 1234 kubelet.go:2347] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin is not ready: cni plugin not initialized"
+
+
+Step 3: Check kubelet Logs
+sudo journalctl -u kubelet --no-pager | tail -50
+
+Error Messages:
+E1231 16:45:10.123456 1234 kubelet.go:2347] "Container runtime network not ready" networkReady="NetworkReady=false reason:NetworkPluginNotReady message:Network plugin is not ready: cni plugin not initialized"
+
+E1231 16:45:11.234567 1234 kuberuntime_manager.go:945] "Error syncing pod" pod="kube-system/calico-node-xyz" podUID="abc-123" err="failed to create pod sandbox: rpc error: code = Unknown desc = failed to setup network for sandbox: networkPlugin cni failed to set up pod network"
+
+W1231 16:45:12.345678 1234 cni.go:333] Unable to update cni config: no networks found in /etc/cni/net.d
+
+⚠️ Understanding the Issue
+
+Container Network Interface (CNI):
+- CNI plugins provide networking for pods
+- Configuration stored in `/etc/cni/net.d/`
+- Common CNI plugins: Calico, Flannel, Weave, Cilium
+- Without CNI, pods cannot communicate
+
+Why Node is NotReady:
+- kubelet checks CNI status during health checks
+- If CNI not initialized → Node marked NotReady
+- DaemonSets (like CNI pods) won't work properly
+- Regular workload pods can't get IP addresses
+
+🔧 Solution Steps
+
+Step 1: Check CNI Configuration Directory
+# Check if CNI directory exists
+ls -la /etc/cni/
+
+# Expected output should include net.d directory
+
+Problem Found:
+node01:/etc/cni$ ls -la
+total 8
+drwxr-xr-x  2 root root 4096 Dec 31 16:30 .
+drwxr-xr-x 85 root root 4096 Dec 31 16:30 ..
+drwxr-xr-x  2 root root 4096 Dec 31 16:30 net.d.bak  # WRONG! Should be net.d
+
+Step 2: Check Control Plane CNI Config (for reference)
+# On control plane, check correct CNI structure
+ls -la /etc/cni/net.d/
+
+Correct Output:
+total 12
+drwxr-xr-x 2 root root 4096 Dec 31 16:12 .
+drwxr-xr-x 3 root root 4096 Dec 31 16:12 ..
+-rw-r--r-- 1 root root  696 Dec 31 16:12 10-canal.conflist
+-rw-r--r-- 1 root root  639 Feb 13  2024 87-podman-bridge.conflist
+-rw------- 1 root root 2764 Dec 31 16:12 calico-kubeconfig
+
+Step 3: Fix CNI Directory Name
+# On worker node, rename directory back to correct name
+sudo mv /etc/cni/net.d.bak /etc/cni/net.d
+
+# Verify the fix
+ls -la /etc/cni/net.d/
+
+Expected Output After Fix:
+total 12
+drwxr-xr-x 2 root root 4096 Dec 31 16:12 .
+drwxr-xr-x 3 root root 4096 Dec 31 16:50 ..
+-rw-r--r-- 1 root root  696 Dec 31 16:12 10-canal.conflist
+-rw-r--r-- 1 root root  639 Feb 13  2024 87-podman-bridge.conflist
+-rw------- 1 root root 2764 Dec 31 16:12 calico-kubeconfig
+
+Step 4: Restart kubelet
+sudo systemctl restart kubelet
+
+# Watch the logs
+sudo journalctl -u kubelet -f
+
+📝 Verification
+# Check kubelet status - should be clean now
+sudo systemctl status kubelet
+
+# From control plane, check node status
+kubectl get nodes
+
+# Expected output:
+NAME           STATUS   ROLES           AGE   VERSION
+controlplane   Ready    control-plane   12d   v1.34.3
+node01         Ready    <none>          12d   v1.34.3
+
+# Verify CNI pods are running
+kubectl get pods -n kube-system -o wide | grep -E 'calico|flannel|weave|cilium'
+
+# Check if regular pods can now get scheduled
+kubectl get pods -A -o wide
+
+🎯 Additional CNI Troubleshooting
+
+Check CNI Plugin Installation
+# List CNI binaries
+ls -la /opt/cni/bin/
+
+# Should contain plugins like:
+# bridge, flannel, host-local, loopback, portmap, etc.
+
+Verify CNI Configuration
+# Check CNI config files
+cat /etc/cni/net.d/*.conflist
+
+# Verify kubeconfig for CNI (if using Calico)
+cat /etc/cni/net.d/calico-kubeconfig
+
+Reinstall CNI if Needed
+# Example: Reinstall Calico (from control plane)
+kubectl apply -f https://docs.projectcalico.org/manifests/calico.yaml
+
+# Example: Reinstall Flannel
+kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+
+Check CNI DaemonSet Logs
+# Get CNI pod name
+kubectl get pods -n kube-system -l k8s-app=calico-node -o wide
+
+# Check logs
+kubectl logs <cni-pod-name> -n kube-system
+
+# If multiple containers in pod
+kubectl logs <cni-pod-name> -n kube-system -c calico-node
+
+Scenario 5: Service Not Accessible - Selector Mismatch
+
+🔍 Problem Description
+- Pods are running successfully
+- Service exists but not accessible
+- Network connectivity test from test pod fails
+- Issue is with Service selector not matching Pod labels
+
+📊 Initial Observation
+
+Check running pods
+kubectl get pods
+
+Check services
+kubectl get svc
+
+Output:
+Pods
+NAME                   READY   STATUS    RESTARTS   AGE
+web-6d4cf56db6-7x8hs   1/1     Running   0          10m
+web-6d4cf56db6-k9n2p   1/1     Running   0          10m
+
+Services
+NAME       TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+web-svc    ClusterIP   10.100.200.50   <none>        80/TCP    10m
+
+🔧 Debugging Steps
+
+Step 1: Test Service Connectivity
+Create test pod
+kubectl run test-pod --image=nginx --rm -it -- bash
+
+Once inside the pod, test the service
+curl web-svc
+
+Or from outside the pod
+kubectl run test-pod --image=nginx --rm -it -- curl web-svc
+
+Error Output:
+curl: (7) Failed to connect to web-svc port 80: Connection refused
+OR
+curl: (6) Could not resolve host: web-svc
+
+Step 2: Describe the Service
+kubectl describe svc web-svc
+
+Problem Output:
+Name:              web-svc
+Namespace:         default
+Labels:            <none>
+Annotations:       <none>
+Selector:          app=web-svc      # WRONG SELECTOR!
+Type:              ClusterIP
+IP Family Policy:  SingleStack
+IP:                10.100.200.50
+Port:              <unset>  80/TCP
+TargetPort:        80/TCP
+Endpoints:         <none>           # NO ENDPOINTS - THIS IS THE PROBLEM!
+Session Affinity:  None
+Events:            <none>
+
+Key Issue: `Endpoints: <none>` means service is not routing to any pods!
+
+Step 3: Check Pod Labels
+kubectl get pods --show-label
+
+Output:
+NAME                   READY   STATUS    RESTARTS   AGE   LABELS
+web-6d4cf56db6-7x8hs   1/1     Running   0          10m   app=web,pod-template-hash=6d4cf56db6
+web-6d4cf56db6-k9n2p   1/1     Running   0          10m   app=web,pod-template-hash=6d4cf56db6
+
+Problem Identified:
+- Service selector: `app=web-svc`
+- Pod labels: `app=web`
+- **Mismatch!** Service can't find pods
+
+⚠️ Understanding the Issue
+
+How Services Work:
+1. Service uses selectors to find matching pods
+2. Endpoints controller creates Endpoint objects for matching pods
+3. kube-proxy uses Endpoints to route traffic
+4. If selectors don't match labels → No Endpoints → Connection fails
+
+Service → Selector → Pods Flow:
+Service (selector: app=web-svc)
+    ↓ (looking for pods with app=web-svc)
+    ✗ No match found
+    
+Pods (labels: app=web)
+    ↑ Not selected by service
+
+🔧 Solution Steps
+
+Step 1: Edit Service Selector
+# Edit the service
+kubectl edit svc web-svc
+
+# Or use kubectl patch
+kubectl patch svc web-svc -p '{"spec":{"selector":{"app":"web"}}}'
+
+Before (Wrong):
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-svc
+spec:
+  selector:
+    app: web-svc    # WRONG!
+  ports:
+  - port: 80
+    targetPort: 80
+
+After (Correct):
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-svc
+spec:
+  selector:
+    app: web        # CORRECTED!
+  ports:
+  - port: 80
+    targetPort: 80
+
+Step 2: Verify Endpoints are Created
+kubectl describe svc web-svc
+
+Correct Output:
+Name:              web-svc
+Selector:          app=web                    # CORRECTED
+Endpoints:         10.244.1.5:80,10.244.1.6:80  # ENDPOINTS NOW EXIST!
+
+Or check endpoints directly:
+kubectl get endpoints web-svc
+
+Output:
+NAME      ENDPOINTS                       AGE
+web-svc   10.244.1.5:80,10.244.1.6:80    10m
+
+Step 3: Test Service Again
+# Create test pod and curl
+kubectl run test-pod --image=nginx --rm -it -- bash
+
+# Inside the pod
+curl web-svc
+
+# Or one-liner
+kubectl run test-pod --image=busybox --rm -it -- wget -O- web-svc
+
+Success Output:
+html
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+...
+</html>
+
+
+📝 Verification Checklist
+# 1. Verify service selector matches pod labels
+kubectl get svc web-svc -o yaml | grep -A 2 selector
+kubectl get pods --show-labels | grep web
+
+# 2. Check endpoints exist
+kubectl get endpoints web-svc
+
+# 3. Test from another pod
+kubectl run test --image=nginx --rm -it -- curl web-svc
+
+# 4. Check kube-proxy is running
+kubectl get pods -n kube-system | grep kube-proxy
+
+# 5. Verify kube-proxy logs (if still issues)
+kubectl logs -n kube-system <kube-proxy-pod-name>
+
+🎯 Additional Service Troubleshooting
+
+Check Service Details
+# Get service YAML
+kubectl get svc web-svc -o yaml
+
+# Check service type
+kubectl get svc web-svc -o jsonpath='{.spec.type}'
+
+# Check ClusterIP
+kubectl get svc web-svc -o jsonpath='{.spec.clusterIP}'
+
+Verify Port Configuration
+# Check if pod port matches service targetPort
+kubectl get pod <pod-name> -o yaml | grep -A 5 ports
+
+# Service should target the correct container port
+kubectl get svc web-svc -o yaml | grep targetPort
+
+Test with Pod IP Directly
+# Get pod IP
+kubectl get pod <pod-name> -o wide
+
+# Test direct pod access
+kubectl run test --image=
+kubectl run test --image=
